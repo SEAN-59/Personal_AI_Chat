@@ -1,0 +1,52 @@
+# 프로덕션(시놀리지 NAS) 컴포즈.
+# 시놀리지 Container Manager → 프로젝트 기능으로 띄움.
+# 이미지는 GitHub Actions 가 GHCR 로 푸시한 것을 pull.
+#
+# 배치 위치 (시놀리지 기준):
+#   /volume1/docker/ai_chat/
+#     ├── docker-compose.yml   (이 파일을 이 이름으로 배치)
+#     ├── .env                 (.env.prod.example.txt 를 채워 복사)
+#     ├── pgdata/              (자동 생성 — DB 영속화)
+#     └── resources/           (자동 생성 — 업로드 파일 영속화)
+
+services:
+  web:
+    # GHCR 이미지. 태그는 .env 의 APP_IMAGE_TAG 로 제어 (예: v0.3.0, latest).
+    image: ghcr.io/sean-59/personal_ai_chat:${APP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # DB 접속은 같은 컴포즈 네트워크 안의 서비스명으로.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    volumes:
+      # 업로드 파일 영속화 (원본 문서·아이콘 등).
+      - ./resources:/app/resources
+    ports:
+      # 시놀리지 호스트 7008 → 컨테이너 8000 (gunicorn).
+      # DSM 역방향 프록시가 https://aicb.ipstein.myds.me → localhost:7008 으로 붙임.
+      - "7008:8000"
+
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    ports:
+      # 호스트 8007 → 컨테이너 5432. DB 관리툴 접속용.
+      # 외부 노출이 싫으면 이 블록 삭제해도 web↔db 내부 통신엔 무관.
+      - "8007:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
