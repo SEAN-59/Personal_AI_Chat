@@ -3,7 +3,7 @@
 # 이미지는 GitHub Actions 가 GHCR 로 푸시한 것을 pull.
 #
 # 배치 위치 (시놀리지 기준):
-#   /volume1/docker/ai_chat/
+#   /volume1/ai_chat/
 #     ├── docker-compose.yml   (이 파일을 이 이름으로 배치)
 #     ├── .env                 (.env.prod.example.txt 를 채워 복사)
 #     ├── pgdata/              (자동 생성 — DB 영속화)

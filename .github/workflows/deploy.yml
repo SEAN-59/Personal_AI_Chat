@@ -91,10 +91,10 @@ jobs:
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
           # 시놀리지에서 태그 변경 후 pull/up.
-          # /volume1/docker/ai_chat/ 에 이미 docker-compose.yml + .env 가 놓여 있어야 함.
+          # /volume1/ai_chat/ 에 이미 docker-compose.yml + .env 가 놓여 있어야 함.
           ssh -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 "$DEPLOY_USER@$DEPLOY_HOST" bash <<EOF
           set -euo pipefail
-          cd /volume1/docker/ai_chat
+          cd /volume1/ai_chat
 
           # .env 내 APP_IMAGE_TAG 값을 이번 태그로 교체 (없으면 추가).
           if grep -q '^APP_IMAGE_TAG=' .env; then
