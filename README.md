@@ -299,17 +299,25 @@ pending → processing → reviewing → processing → ready
 | `OPENAI_API_KEY` | OpenAI API 키 | `sk-proj-...` 형식 |
 | `OPENAI_MODEL` | 사용 모델 | 기본 `gpt-4o-mini` |
 
-**실행**
-- `docker compose up -d` — web(Django, 8001) + db(PostgreSQL 17, 5432) 컨테이너 기동.
-- `docker compose exec web python manage.py migrate` — 초기 DB 마이그레이션(최초 1회 또는 모델 변경 시).
-- 브라우저에서 `http://localhost:8001/` — 채팅 화면, `http://localhost:8001/bo/` — 백오피스.
+**실행 순서**
+1. `docker compose up -d` — web(Django, 8001) + db(PostgreSQL 17, 5432) 컨테이너 기동.
+2. `docker compose exec web python manage.py migrate` — **DB 스키마 생성 (필수)**. 이 명령을 돌리기 전까지는 DB에 테이블이 하나도 없어서 서비스가 정상 동작하지 않음.
+3. 브라우저에서 `http://localhost:8001/` — 채팅 화면, `http://localhost:8001/bo/` — 백오피스.
+
+> ⚠️ **DB 테이블은 자동 생성되지 않습니다.** Django는 모델 정의(`models.py`)와 실제 DB 테이블을 마이그레이션 파일을 통해 동기화합니다. 컨테이너만 띄워도 Postgres는 비어있는 상태이므로, `migrate` 명령을 반드시 한 번 실행해야 테이블·인덱스·pgvector 확장이 모두 만들어집니다.
 
 **최초 셋업 체크리스트**
 1. `env.example.txt`을 `.env`로 복사.
 2. `.env`의 각 값을 채움 (`DJANGO_SECRET_KEY` 생성, `POSTGRES_PASSWORD` 설정, `OPENAI_API_KEY` 발급 후 입력).
-3. `docker compose up -d` → 컨테이너 기동, 마이그레이션 실행.
-4. (선택) 챗봇 아이콘 이미지를 `resources/icon/icon.png`에 배치.
-5. BO 파일관리에서 회사 문서 업로드 시작.
+3. `docker compose up -d` — 컨테이너 기동.
+4. `docker compose exec web python manage.py migrate` — DB 스키마 생성 (최초 1회, 필수).
+5. (선택) 챗봇 아이콘 이미지를 `resources/icon/icon.png`에 배치.
+6. BO 파일관리에서 회사 문서 업로드 시작.
+
+**마이그레이션을 다시 실행해야 할 때**
+- 모델(`*/models.py`)을 수정한 뒤 `docker compose exec web python manage.py makemigrations` → `migrate`.
+- DB 볼륨을 초기화(`docker compose down -v`)한 뒤에는 다시 `migrate`로 스키마 재구축 필요.
+- 첫 `migrate`가 `pgvector` 확장, `pg_trgm` 확장, 4개 앱의 테이블, HNSW·GIN 인덱스를 모두 생성.
 
 **주요 디렉토리**
 - `chat/`, `files/`, `bo/`, `AI_Chat/` — Django 앱·설정.
