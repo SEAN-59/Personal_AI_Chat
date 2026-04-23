@@ -18,19 +18,15 @@ from openai import OpenAI
 from chat.models import CanonicalQA, TokenUsage
 from chat.services.prompt_builder import build_messages
 from chat.services.qa_retriever import save_chat_log, search_canonical_qa
-from chat.services.reranker import rerank
+from chat.services.single_shot.retrieval import retrieve_documents
 from chat.services.single_shot.types import QueryPipelineError, QueryResult
 from files.models import Document
-from files.services.retriever import search_chunks
 
 
 logger = logging.getLogger(__name__)
 
 
-# 검색 설정
-CHUNK_CANDIDATES = 10
-CHUNK_TOP_K = 5
-
+# 검색 설정 (청크 상수는 single_shot.retrieval 로 이전)
 QA_TOP_K = 3
 QA_SIMILARITY_THRESHOLD = 0.80
 
@@ -72,11 +68,8 @@ def answer_question(
 ) -> QueryResult:
     history = history or []
 
-    # 1) 자료 후보 검색 + 재정렬
-    candidates = search_chunks(question, top_k=CHUNK_CANDIDATES)
-    logger.info('후보 검색: %d개 (질문: %s)', len(candidates), question[:30])
-    chunk_hits = rerank(question, candidates, top_k=CHUNK_TOP_K)
-    logger.info('재정렬 후 선택: %d개', len(chunk_hits))
+    # 1~2) 자료 후보 검색 + 재정렬
+    chunk_hits = retrieve_documents(question)
 
     # 2) 공식 Q&A 검색
     qa_hits = search_canonical_qa(
