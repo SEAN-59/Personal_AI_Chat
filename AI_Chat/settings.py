@@ -150,6 +150,34 @@ USE_I18N = True
 USE_TZ = True
 
 
+# ─── 로깅 ──────────────────────────────────────────────
+# Django 기본 LOGGING 은 django.* 로거만 콘솔로 보낸다. 우리 앱(chat / bo / files)의
+# INFO 레벨 메시지는 root 로 올라가 drop 되므로 명시적으로 콘솔 handler 를 붙인다.
+# Phase 4-1 router_node 의 fallback INFO 처럼 운영 관측에 필요한 로그가 실제 콘솔/
+# docker compose logs 에 노출되어야 한다.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '{levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'loggers': {
+        'chat':  {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'bo':    {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'files': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+}
+
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
