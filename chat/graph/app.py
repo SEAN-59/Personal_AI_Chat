@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 
 from chat.graph.nodes.router import router_node
 from chat.graph.nodes.single_shot import single_shot_node
+from chat.graph.routes import ROUTE_AGENT, ROUTE_SINGLE_SHOT, ROUTE_WORKFLOW
 from chat.graph.state import GraphState
 from chat.services.single_shot.types import QueryPipelineError, QueryResult
 
@@ -27,10 +28,17 @@ def _compiled_graph():
     builder.add_edge(START, 'router')
     builder.add_conditional_edges(
         'router',
-        # state.route 값을 그대로 key 로 쓴다. Phase 4 에서 선택지가 늘어날 때
-        # selector 는 건드리지 않고 아래 매핑에 키/노드만 추가하면 된다.
+        # state.route 값(ROUTE_* 중 하나)을 그대로 key 로 매핑한다.
         lambda state: state['route'],
-        {'single_shot': 'single_shot'},
+        {
+            ROUTE_SINGLE_SHOT: 'single_shot',
+            # Phase 4-1 동안 workflow/agent 노드가 아직 없어 single_shot 으로
+            # 내부 포워딩한다. Phase 5~6 에서 ROUTE_WORKFLOW 키를 실제 workflow
+            # 노드 이름으로, Phase 7 에서 ROUTE_AGENT 키를 agent 노드 이름으로
+            # 교체하면 해당 경로가 열린다.
+            ROUTE_WORKFLOW: 'single_shot',
+            ROUTE_AGENT: 'single_shot',
+        },
     )
     builder.add_edge('single_shot', END)
 
