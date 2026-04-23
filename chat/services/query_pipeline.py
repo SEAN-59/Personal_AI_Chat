@@ -15,24 +15,20 @@ from typing import Dict, List, Optional
 
 from openai import OpenAI
 
-from chat.models import CanonicalQA, TokenUsage
+from chat.models import TokenUsage
 from chat.services.prompt_builder import build_messages
-from chat.services.qa_retriever import save_chat_log, search_canonical_qa
+from chat.services.qa_retriever import save_chat_log
+from chat.services.single_shot.qa_cache import find_canonical_qa, resolve_cache_hit
 from chat.services.single_shot.retrieval import retrieve_documents
 from chat.services.single_shot.types import QueryPipelineError, QueryResult
-from files.models import Document
 
 
 logger = logging.getLogger(__name__)
 
 
-# 검색 설정 (청크 상수는 single_shot.retrieval 로 이전)
-QA_TOP_K = 3
-QA_SIMILARITY_THRESHOLD = 0.80
-
-# 공식 Q&A 캐시 히트 기준 — 이 이상 유사하면 OpenAI 호출 없이 그 답변을 그대로 반환
-# 낮출수록 캐시 적중률↑ (일관성·속도·비용 ↑) / 너무 낮추면 다른 질문에도 같은 답 나갈 위험
-QA_CACHE_HIT_THRESHOLD = 0.88
+# 검색 설정은 각 helper 로 이전됨:
+#   - 청크 상수: chat.services.single_shot.retrieval
+#   - QA 상수:   chat.services.single_shot.qa_cache
 
 # GPT 답변이 "자료에 없음" 응답인지 판별하는 패턴
 _NO_INFO_MARKERS = (
@@ -71,32 +67,13 @@ def answer_question(
     # 1~2) 자료 후보 검색 + 재정렬
     chunk_hits = retrieve_documents(question)
 
-    # 2) 공식 Q&A 검색
-    qa_hits = search_canonical_qa(
-        question,
-        top_k=QA_TOP_K,
-        similarity_threshold=QA_SIMILARITY_THRESHOLD,
-    )
-    logger.info('CanonicalQA 검색: %d개', len(qa_hits))
+    # 3) 공식 Q&A 검색
+    qa_hits = find_canonical_qa(question)
 
-    # 2-1) 캐시 히트 — 거의 동일한 공식 질문이 있으면 OpenAI 생략
-    if qa_hits and qa_hits[0].similarity >= QA_CACHE_HIT_THRESHOLD:
-        hit = qa_hits[0]
-        logger.info('CanonicalQA 캐시 히트 (sim=%.3f, qa_id=%d)', hit.similarity, hit.qa_id)
-        canonical = CanonicalQA.objects.filter(pk=hit.qa_id).first()
-        cached_sources: List[Dict] = []
-        if canonical and canonical.sources:
-            for d in Document.objects.filter(pk__in=canonical.sources):
-                cached_sources.append({
-                    'name': d.original_name,
-                    'url': d.file.url if d.file else '',
-                })
-        return QueryResult(
-            reply=hit.answer,
-            sources=cached_sources,
-            total_tokens=0,       # OpenAI 호출 없음
-            chat_log_id=None,     # 재사용 응답은 ChatLog 생성 X
-        )
+    # 4) 캐시 히트면 즉시 반환 (OpenAI 호출 생략)
+    cached = resolve_cache_hit(qa_hits)
+    if cached is not None:
+        return cached
 
     # 3) 프롬프트 조립
     messages = build_messages(question, chunk_hits, qa_hits, history)
