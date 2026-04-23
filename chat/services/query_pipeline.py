@@ -11,7 +11,6 @@
 
 import logging
 import os
-from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from openai import OpenAI
@@ -20,6 +19,7 @@ from chat.models import CanonicalQA, TokenUsage
 from chat.services.prompt_builder import build_messages
 from chat.services.qa_retriever import save_chat_log, search_canonical_qa
 from chat.services.reranker import rerank
+from chat.services.single_shot.types import QueryPipelineError, QueryResult
 from files.models import Document
 from files.services.retriever import search_chunks
 
@@ -64,19 +64,6 @@ def _is_casual_reply(reply: str) -> bool:
     if len(reply) > _CASUAL_MAX_LEN:
         return False
     return any(marker in reply for marker in _CASUAL_MARKERS)
-
-
-@dataclass
-class QueryResult:
-    """파이프라인 출력."""
-    reply: str
-    sources: List[Dict]                 # [{name, url}, ...]
-    total_tokens: int
-    chat_log_id: Optional[int] = None   # 저장된 ChatLog id (피드백 용)
-
-
-class QueryPipelineError(Exception):
-    """쿼리 파이프라인 실패."""
 
 
 def answer_question(
