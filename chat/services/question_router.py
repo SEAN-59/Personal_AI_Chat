@@ -1,33 +1,27 @@
-"""규칙 기반 질문 분류기.
+"""질문 분류기 (Phase 4-2).
 
-graph 의 router_node 가 부른다. Phase 4-1 에서는 단순 `substring contains` 기반:
+graph 의 router_node 가 부른다. 우선순위는:
 
-    1. workflow 키워드 매치 → 'workflow'
-    2. agent 키워드 매치 → 'agent'
-    3. 그 외          → 'single_shot'
+    1. DB RouterRule 조회 (enabled=True, priority DESC) — 매치 있으면 해당 route
+    2. 코드 상수(WORKFLOW_KEYWORDS / AGENT_KEYWORDS) 키워드 매칭
+    3. 그래도 없으면 'single_shot' (default)
+
+코드 상수는 **영구 보존되는 기본 동작**이다. DB rule 은 운영 중 조정하는
+override 계층. BO 에서 rule 을 다 지우거나 DB 가 비어있어도 코드 키워드로
+Phase 4-1 동작 그대로 유지된다.
 
 workflow 가 agent 보다 먼저인 이유: 정형 계산은 저렴·안정적이므로 애매할 때
 workflow 쪽이 안전. agent 는 탐색·비교가 명확할 때만 사용.
-
-Phase 4-2 (BO RouterRule) 이후 구조는 이렇게 바뀐다:
-    DB RouterRule 조회  ──매치 있음──▶ 해당 route
-          │
-          └매치 없음──▶ 이 모듈의 키워드 상수 (fallback)
-          │
-          └그래도 없음──▶ 'single_shot' (default)
-
-즉 이 모듈의 키워드 상수는 장기적으로 fallback 계층 역할을 맡는다.
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from chat.graph.routes import ROUTE_AGENT, ROUTE_SINGLE_SHOT, ROUTE_WORKFLOW
 
 
 # 정형 계산·산정 성격 질문 신호.
-# 단순히 단어 하나만 보고 판단하지만, 오분류 사례(예: '복지포인트는 얼마야?')는
-# Phase 4-2 의 BO rule priority / negative pattern 으로 조정할 예정.
+# BO RouterRule 이 비어있을 때의 fallback 키워드 — '기본 동작' 역할.
 WORKFLOW_KEYWORDS: tuple[str, ...] = (
     '계산', '산정', '얼마', '몇 일', '몇 년', '평균', '합계', '차감',
     '근속', '퇴직금', '연차 계산', '잔여 연차', '급여', '수당',
@@ -44,13 +38,38 @@ AGENT_KEYWORDS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class RouteDecision:
-    """라우터 결정. Phase 4-1 은 route/reason/matched_rules 만 채운다.
+    """라우터 결정.
 
-    confidence 같은 추가 필드는 LLM 보조 분류가 들어오는 Phase 4-2 이후 도입.
+    reason 포맷:
+      - 'db_rule:<name>'      — DB RouterRule 매치
+      - 'workflow_keyword'    — 코드 WORKFLOW_KEYWORDS 매치
+      - 'agent_keyword'       — 코드 AGENT_KEYWORDS 매치
+      - 'default'             — 아무것도 매치 안 됨
     """
-    route: str                                          # ROUTE_* 중 하나
-    reason: str                                         # 'workflow_keyword' / 'agent_keyword' / 'default'
-    matched_rules: List[str] = field(default_factory=list)  # 매치된 키워드(들)
+    route: str
+    reason: str
+    matched_rules: List[str] = field(default_factory=list)
+
+
+def _match_db_rules(question: str) -> Optional[RouteDecision]:
+    """DB RouterRule 을 priority 순으로 순회해 첫 매치 반환. 없으면 None.
+
+    lazy import 로 Django app 로딩 순서와 무관하게 동작.
+    현재는 match_type='contains' 만 지원.
+    """
+    from chat.models import RouterRule  # lazy to avoid app-registry issues
+
+    # Meta.ordering 이 (-priority, -updated_at) 이라 별도 order_by 불필요.
+    for rule in RouterRule.objects.filter(enabled=True):
+        if rule.match_type == RouterRule.MatchType.CONTAINS:
+            if rule.pattern and rule.pattern in question:
+                return RouteDecision(
+                    route=rule.route,
+                    reason=f'db_rule:{rule.name}',
+                    matched_rules=[rule.pattern],
+                )
+        # 다른 match_type 은 아직 미지원 — 무시하고 다음 rule 로.
+    return None
 
 
 def _matches(question: str, keywords: tuple[str, ...]) -> List[str]:
@@ -59,7 +78,11 @@ def _matches(question: str, keywords: tuple[str, ...]) -> List[str]:
 
 
 def route_question(question: str) -> RouteDecision:
-    """질문을 3 route 중 하나로 분류."""
+    """질문을 3 route 중 하나로 분류 (DB → 코드 fallback → default 순)."""
+    db_decision = _match_db_rules(question)
+    if db_decision is not None:
+        return db_decision
+
     hits = _matches(question, WORKFLOW_KEYWORDS)
     if hits:
         return RouteDecision(
