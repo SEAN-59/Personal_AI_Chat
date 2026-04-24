@@ -47,6 +47,12 @@ PROMPT_REGISTRY: list[PromptEntry] = [
         description='검색 결과가 전혀 없을 때 외부 지식으로 답하지 못하게 막는 가드 문구.',
         relative_path='chat/no_sources_guard.md',
     ),
+    PromptEntry(
+        key='chat-query-rewriter',
+        title='검색어 재작성 프롬프트',
+        description='후속 질문이 "비싼거" 처럼 맥락에 의존할 때, 직전 대화를 반영해 자립 검색어로 바꾸는 지시문. retrieval 앞단에서만 사용되며 최종 답변에는 영향을 주지 않는다.',
+        relative_path='chat/query_rewriter.md',
+    ),
 ]
 
 # O(1) 조회용
