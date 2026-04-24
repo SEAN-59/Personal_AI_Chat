@@ -145,14 +145,14 @@
 
   /* ── 검색 폼 (탭 바로 아래) ───────────────────────────────────── */
   /* 내부 구성요소는 가이드라인 .input-icon-wrap / .input.input-with-icon-left
-     / .btn.btn-primary / .btn.btn-secondary.refresh-btn 을 그대로 사용한다. */
+     / .btn.btn-primary / .btn.btn-secondary.refresh-btn 을 그대로 사용한다.
+     폭은 아래 카드 리스트와 같이 가로 전체를 쓴다. */
   .qa-search {
     display: flex;
     gap: var(--space-2);
     margin-bottom: var(--space-4);
-    max-width: 520px;
   }
-  .qa-search .input-icon-wrap { flex: 1; }
+  .qa-search .input-icon-wrap { flex: 1; min-width: 0; }
   .qa-search .refresh-btn {
     flex-shrink: 0;
     width: 38px;
