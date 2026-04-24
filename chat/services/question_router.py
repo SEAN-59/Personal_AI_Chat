@@ -60,10 +60,16 @@ class RouteDecision:
       - 'workflow_keyword'    — 코드 WORKFLOW_KEYWORDS 매치
       - 'agent_keyword'       — 코드 AGENT_KEYWORDS 매치
       - 'default'             — 아무것도 매치 안 됨
+
+    `workflow_key` (Phase 6-1): `route == 'workflow'` 일 때 어떤 generic
+    workflow 로 보낼지. DB RouterRule 이 지정한 값이면 그대로, 코드 키워드
+    fallback 경로에서는 항상 빈 문자열(= `workflow_node` 가 single_shot 으로
+    폴백).
     """
     route: str
     reason: str
     matched_rules: List[str] = field(default_factory=list)
+    workflow_key: str = ''
 
 
 def _match_db_rules(question: str) -> Optional[RouteDecision]:
@@ -78,10 +84,16 @@ def _match_db_rules(question: str) -> Optional[RouteDecision]:
     for rule in RouterRule.objects.filter(enabled=True):
         if rule.match_type == RouterRule.MatchType.CONTAINS:
             if rule.pattern and rule.pattern in question:
+                # workflow_key 는 route == 'workflow' 일 때만 의미가 있다 —
+                # 다른 route 의 rule 이 workflow_key 를 들고 있어도 무시.
+                workflow_key = (
+                    rule.workflow_key if rule.route == 'workflow' else ''
+                )
                 return RouteDecision(
                     route=rule.route,
                     reason=f'db_rule:{rule.name}',
                     matched_rules=[rule.pattern],
+                    workflow_key=workflow_key or '',
                 )
         # 다른 match_type 은 아직 미지원 — 무시하고 다음 rule 로.
     return None
