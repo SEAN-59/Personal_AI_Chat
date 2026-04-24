@@ -41,9 +41,13 @@ def run_single_shot(
 
     # 0) 검색어 재작성 — 맥락 의존 후속 질문을 self-contained 쿼리로 변환.
     #    history 가 비어있거나 LLM 이 실패하면 원본 질문이 그대로 돌아온다.
-    search_query, _rewriter_usage, _rewriter_model = rewrite_query_with_history(
+    search_query, rewriter_usage, rewriter_model = rewrite_query_with_history(
         question, history,
     )
+    # 재작성 호출이 실제로 일어났다면 본 LLM 호출과 구분해 별도 레코드로 남긴다.
+    # 재작성 실패 / history 빈 경로에서는 usage 가 None 이라 기록하지 않는다.
+    if rewriter_usage is not None and rewriter_model is not None:
+        record_token_usage(rewriter_model, rewriter_usage)
 
     # 1~2) 자료 후보 검색 + 재정렬
     chunk_hits = retrieve_documents(search_query)
