@@ -1,0 +1,190 @@
+{% extends 'bo/base.html' %}
+
+{% block title %}라우팅 관리{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* 헤더 우측 버튼이 좁은 폭에서 줄바꿈되지 않게 */
+  .page-header .btn { white-space: nowrap; }
+
+  /* 규칙 비활성화 행 */
+  .rule-row-disabled td { opacity: 0.55; }
+
+  /* 패턴 인라인 코드 칩 (가이드에 해당 컴포넌트 없음) */
+  .rule-pattern {
+    font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+    font-size: var(--font-size-xs);
+    background: var(--color-bg-secondary);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+  }
+
+  /* 행 내 액션 버튼 정렬 */
+  .rule-actions { display: flex; gap: var(--space-2); justify-content: center; }
+  .rule-actions form { display: inline; }
+
+  /* 기본 키워드 섹션 (collapsible details) — 가이드에 해당 컴포넌트 없음 */
+  .defaults-block {
+    margin-top: var(--space-6);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-5);
+  }
+  .defaults-block > summary {
+    cursor: pointer;
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+    list-style: none;
+  }
+  .defaults-block > summary::-webkit-details-marker { display: none; }
+  .defaults-block > summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: var(--space-2);
+    transition: transform var(--transition-base);
+  }
+  .defaults-block[open] > summary::before { transform: rotate(90deg); }
+
+  .defaults-body {
+    margin-top: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .defaults-card-header { margin-bottom: var(--space-3); }
+  .defaults-card-keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  /* 키워드 태그 (가이드에 해당 컴포넌트 없음) */
+  .kw-tag {
+    display: inline-block;
+    font-size: var(--font-size-xs);
+    padding: 2px var(--space-2);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+  }
+  .defaults-note {
+    margin-top: var(--space-3);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    line-height: var(--line-height-normal);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">라우팅 관리</h1>
+    <p class="page-description">질문을 어떤 방식(<code>single_shot / workflow / agent</code>)으로 처리할지 결정하는 규칙을 관리합니다.</p>
+  </div>
+  <a href="{% url 'bo:router_rules_new' %}" class="btn btn-primary">+ 새 규칙</a>
+</header>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+{% if rules %}
+  <section class="card" style="padding: 0;">
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>이름</th>
+            <th>처리 방식</th>
+            <th>매치</th>
+            <th>키워드</th>
+            <th>우선순위</th>
+            <th>상태</th>
+            <th>동작</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rule in rules %}
+            <tr class="{% if not rule.enabled %}rule-row-disabled{% endif %}">
+              <td>
+                <div style="font-weight: var(--font-weight-medium);">{{ rule.name }}</div>
+                {% if rule.description %}
+                  <div style="font-size: var(--font-size-xs); color: var(--color-text-muted); margin-top: 2px;">{{ rule.description }}</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if rule.route == 'workflow' %}<span class="badge badge-info">workflow</span>
+                {% elif rule.route == 'agent' %}<span class="badge badge-warning">agent</span>
+                {% else %}<span class="badge">single-shot</span>{% endif %}
+              </td>
+              <td style="font-size: var(--font-size-xs); color: var(--color-text-secondary);">{{ rule.get_match_type_display }}</td>
+              <td><span class="rule-pattern">{{ rule.pattern }}</span></td>
+              <td style="font-variant-numeric: tabular-nums;">{{ rule.priority }}</td>
+              <td>
+                <form method="post" action="{% url 'bo:router_rules_toggle' rule.pk %}" style="display:inline;">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm" title="클릭하면 {% if rule.enabled %}비활성화{% else %}활성화{% endif %}">
+                    {% if rule.enabled %}활성{% else %}비활성{% endif %}
+                  </button>
+                </form>
+              </td>
+              <td>
+                <div class="rule-actions">
+                  <a href="{% url 'bo:router_rules_edit' rule.pk %}" class="btn btn-sm">편집</a>
+                  <form method="post" action="{% url 'bo:router_rules_delete' rule.pk %}"
+                        onsubmit="return confirm('이 규칙을 삭제하시겠습니까?');">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% else %}
+  <div class="empty-state">
+    <div class="empty-state-title">등록된 규칙이 없습니다</div>
+    <div>기본 동작이 필요한 질문은 그대로 작동합니다.</div>
+  </div>
+{% endif %}
+
+<details class="defaults-block">
+  <summary>기본 키워드</summary>
+  <div class="defaults-body">
+    <div class="card">
+      <div class="defaults-card-header">
+        <span class="badge badge-info">workflow</span>
+      </div>
+      <div class="defaults-card-keywords">
+        {% for kw in workflow_keywords %}
+          <span class="kw-tag">{{ kw }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card">
+      <div class="defaults-card-header">
+        <span class="badge badge-warning">agent</span>
+      </div>
+      <div class="defaults-card-keywords">
+        {% for kw in agent_keywords %}
+          <span class="kw-tag">{{ kw }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="defaults-note">
+      이 키워드들은 기본 키워드로 수정할 수 없습니다. 오분류·누락 발견 시 위 목록에 새 규칙을 추가하세요.
+    </div>
+  </div>
+</details>
+{% endblock %}
