@@ -35,6 +35,10 @@ from chat.workflows.core.result import (
     WorkflowResult,
     WorkflowStatus,
 )
+from chat.workflows.core.tables import (
+    parse_markdown_tables,
+    serialize_table,
+)
 from chat.workflows.core.validation import (
     combine_validations,
     require_fields,
@@ -66,6 +70,9 @@ __all__ = [
     'format_currency',
     'format_date',
     'format_duration',
+    # 표 파서 (Phase 6-3)
+    'parse_markdown_tables',
+    'serialize_table',
     # 실행 계약
     'BaseWorkflow',
     'run_workflow',

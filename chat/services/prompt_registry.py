@@ -59,6 +59,12 @@ PROMPT_REGISTRY: list[PromptEntry] = [
         description='workflow 경로에서 regex 로 채우지 못한 필수 입력 값을 LLM 이 JSON 으로 채워넣을 때 쓰는 지시문. Phase 6-2 에서 도입.',
         relative_path='chat/workflow_input_extractor.md',
     ),
+    PromptEntry(
+        key='chat-table-lookup',
+        title='표 조회 프롬프트',
+        description='table_lookup workflow 가 retrieval 로 확보한 마크다운 표 중에서 사용자가 묻는 셀 하나를 JSON 으로 집어 내도록 지시. Phase 6-3.',
+        relative_path='chat/table_lookup.md',
+    ),
 ]
 
 # O(1) 조회용
