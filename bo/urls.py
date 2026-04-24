@@ -30,4 +30,11 @@ urlpatterns = [
     path('prompts/', views.prompts_index, name='prompts'),
     path('prompts/<slug:key>/', views.prompts_edit, name='prompts_edit'),
     path('prompts/<slug:key>/update/', views.prompts_update, name='prompts_update'),
+
+    # 라우팅 관리 (Phase 4-2 RouterRule CRUD)
+    path('router-rules/', views.router_rules_index, name='router_rules'),
+    path('router-rules/new/', views.router_rules_new, name='router_rules_new'),
+    path('router-rules/<int:pk>/edit/', views.router_rules_edit, name='router_rules_edit'),
+    path('router-rules/<int:pk>/toggle/', views.router_rules_toggle, name='router_rules_toggle'),
+    path('router-rules/<int:pk>/delete/', views.router_rules_delete, name='router_rules_delete'),
 ]

@@ -11,3 +11,10 @@ from .qa import (
     qa_canonical_update,
     qa_canonical_delete,
 )
+from .router_rules import (
+    router_rules_index,
+    router_rules_new,
+    router_rules_edit,
+    router_rules_toggle,
+    router_rules_delete,
+)
