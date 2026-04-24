@@ -112,3 +112,65 @@ class TokenUsage(models.Model):
 
     def __str__(self):
         return f'{self.model} / {self.total_tokens} tok @ {self.created_at:%Y-%m-%d %H:%M}'
+
+
+class RouterRule(models.Model):
+    """2.0.0 Phase 4-2 — 운영자가 BO에서 관리하는 라우팅 rule.
+
+    question_router.route_question 은 이 모델을 먼저 조회하고, 매치가 없을 때만
+    코드 상수(WORKFLOW_KEYWORDS / AGENT_KEYWORDS)로 fallback 한다. DB 가
+    비어있으면 Phase 4-1 동작 그대로.
+
+    Route.choices 값은 chat.graph.routes 의 ROUTE_* 상수와 **동일한 리터럴**
+    ('single_shot' / 'workflow' / 'agent'). 둘 중 하나를 바꾸면 다른 쪽도 반드시
+    맞춰야 한다.
+    """
+
+    class Route(models.TextChoices):
+        SINGLE_SHOT = 'single_shot', 'single-shot'
+        WORKFLOW = 'workflow', 'workflow'
+        AGENT = 'agent', 'agent'
+
+    class MatchType(models.TextChoices):
+        CONTAINS = 'contains', '포함 (contains)'
+        # regex / exact / negative 는 Phase 4-2 이후 확장 후보.
+
+    name = models.CharField(
+        max_length=100,
+        help_text='운영자 식별용 이름 (예: "며칠 보강", "복지포인트 오분류 제외")',
+    )
+    route = models.CharField(
+        max_length=20,
+        choices=Route.choices,
+        help_text='매치 시 보낼 route',
+    )
+    match_type = models.CharField(
+        max_length=20,
+        choices=MatchType.choices,
+        default=MatchType.CONTAINS,
+    )
+    pattern = models.CharField(
+        max_length=256,
+        help_text='매칭할 키워드/패턴 (match_type 에 따라 해석)',
+    )
+    priority = models.IntegerField(
+        default=100,
+        help_text='숫자가 클수록 먼저 평가. 기본값 100, 매우 중요한 rule 은 200+ 권장',
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text='체크 해제하면 router 가 이 rule 을 건너뜀 (삭제 없이 무력화)',
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='이 rule 을 추가한 이유·배경 메모',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-priority', '-updated_at']
+
+    def __str__(self):
+        flag = '' if self.enabled else ' [off]'
+        return f'[{self.route}] {self.name} · "{self.pattern}"{flag}'
