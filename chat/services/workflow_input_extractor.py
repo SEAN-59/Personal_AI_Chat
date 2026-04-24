@@ -14,21 +14,29 @@ schema 기반으로 다음 순서를 따른다:
       잘못 찍은 후보는 workflow 가 INVALID_INPUT 으로 걸러냄 — 중복 검증 아님.
     - 순환 방지를 위해 registry / dispatch 모듈을 import 하지 않는다. schema 만
       파라미터로 받는다.
-
-Phase 6-2 의 LLM fallback 은 다음 커밋에서 붙인다. 이번 커밋은 regex / 토큰
-단계만 구현 + 단위 테스트.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Mapping, Optional, Tuple
 
+from chat.services.prompt_loader import load_prompt
+from chat.services.single_shot.llm import run_chat_completion
+from chat.services.single_shot.types import QueryPipelineError
 from chat.workflows.domains.field_spec import FieldSpec
 
 
 logger = logging.getLogger(__name__)
+
+
+# LLM fallback 에 동원할 최근 history 수 — 너무 많으면 토큰 낭비, 맥락만 간단히.
+_REWRITE_HISTORY_TURNS = 4
+
+# 프롬프트 파일 (prompt_registry 'chat-workflow-input-extractor' 와 동일 경로).
+_PROMPT_PATH = 'chat/workflow_input_extractor.md'
 
 
 # ---------------------------------------------------------------------------
@@ -55,14 +63,14 @@ _INT_RE = re.compile(r'(?<![\d.])[-+]?\d[\d,]*(?![\d.])')
 
 def extract(
     question: str,
-    history: list,  # noqa: ARG001  — Step 3 의 LLM 경로에서 사용 예정
+    history: list,
     schema: Mapping[str, FieldSpec],
 ) -> Tuple[dict[str, Any], Optional[Any], Optional[str]]:
     """질문에서 workflow 에 넘길 input dict 를 만든다.
 
-    반환: `(workflow_input, usage, model)`. 이번 커밋은 regex 전용이라
-    `usage` / `model` 은 항상 `None`. LLM fallback 이 Step 3 에서 붙으면
-    실제 호출 시에만 채운다.
+    반환: `(workflow_input, usage, model)`. LLM 이 실제로 호출된 경우에만
+    `usage` / `model` 이 채워지고, 호출부(`workflow_node`)가 그걸 보고
+    TokenUsage 로그를 남긴다.
     """
     if not schema:
         return {}, None, None
@@ -110,7 +118,187 @@ def extract(
         if not spec.required and spec.default is not None:
             extracted[name] = spec.default
 
+    # 6) LLM fallback — required 인데 아직 비어있는 필드가 있으면.
+    missing_required = [
+        name for name, spec in schema.items()
+        if spec.required and name not in extracted
+    ]
+    if missing_required:
+        llm_output, usage, model = _call_llm_extractor(
+            question=question,
+            history=history,
+            schema=schema,
+            already_extracted=extracted,
+        )
+        if llm_output:
+            _merge_llm_output(extracted, llm_output, schema)
+        return extracted, usage, model
+
     return extracted, None, None
+
+
+# ---------------------------------------------------------------------------
+# LLM fallback
+# ---------------------------------------------------------------------------
+
+def _call_llm_extractor(
+    *,
+    question: str,
+    history: list,
+    schema: Mapping[str, FieldSpec],
+    already_extracted: Mapping[str, Any],
+) -> Tuple[Optional[dict[str, Any]], Optional[Any], Optional[str]]:
+    """LLM 을 호출해 누락된 필드를 JSON 으로 채워오기.
+
+    실패(네트워크 / 파싱 / 비정상 응답) 시 `(None, None, None)` 반환 —
+    호출부는 regex 결과만 들고 진행한다.
+    """
+    try:
+        system_prompt = load_prompt(_PROMPT_PATH)
+    except Exception as exc:  # noqa: BLE001 — prompt 파일 없음 등
+        logger.warning('workflow_input_extractor 프롬프트 로드 실패: %s', exc)
+        return None, None, None
+
+    user_payload = _format_user_payload(
+        question=question,
+        history=history,
+        schema=schema,
+        already_extracted=already_extracted,
+    )
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_payload},
+    ]
+
+    try:
+        raw, usage, model = run_chat_completion(messages)
+    except QueryPipelineError as exc:
+        logger.warning('workflow_input_extractor LLM 호출 실패: %s', exc)
+        return None, None, None
+    except Exception as exc:  # noqa: BLE001 — OpenAI SDK 비정형 예외 방어
+        logger.warning('workflow_input_extractor LLM 예기치 못한 오류: %s', exc)
+        return None, None, None
+
+    parsed = _parse_json_object(raw)
+    if parsed is None:
+        logger.warning('workflow_input_extractor JSON 파싱 실패: %r', raw[:200])
+        return None, usage, model
+
+    logger.info('workflow_input_extractor LLM 보강: %r → %r', raw[:100], parsed)
+    return parsed, usage, model
+
+
+def _format_user_payload(
+    *,
+    question: str,
+    history: list,
+    schema: Mapping[str, FieldSpec],
+    already_extracted: Mapping[str, Any],
+) -> str:
+    """LLM 에 건네줄 user 메시지 텍스트."""
+    schema_lines = []
+    for name, spec in schema.items():
+        desc = f'- {name}: type={spec.type}, required={spec.required}'
+        if spec.aliases:
+            desc += f', aliases={list(spec.aliases)}'
+        if spec.enum_values:
+            desc += f', enum_keys={list(spec.enum_values.keys())}'
+        if spec.default is not None:
+            desc += f', default={spec.default!r}'
+        schema_lines.append(desc)
+
+    trimmed_history = _tail_history(history, _REWRITE_HISTORY_TURNS)
+    history_lines = []
+    if trimmed_history:
+        for msg in trimmed_history:
+            role = msg.get('role', '')
+            content = (msg.get('content') or '').strip()
+            if role and content:
+                history_lines.append(f'{role}: {content}')
+
+    parts = ['Schema:']
+    parts.extend(schema_lines)
+    parts.append('')
+    parts.append(f'Already extracted: {json.dumps(dict(already_extracted), ensure_ascii=False)}')
+    if history_lines:
+        parts.append('')
+        parts.append('Recent conversation:')
+        parts.extend(history_lines)
+    parts.append('')
+    parts.append(f'Current question: {(question or "").strip()}')
+    parts.append('Return JSON only:')
+    return '\n'.join(parts)
+
+
+def _parse_json_object(raw: str) -> Optional[dict[str, Any]]:
+    """첫 `{...}` 블록을 찾아 dict 로 반환. 실패 시 None."""
+    if not raw:
+        return None
+    text = raw.strip()
+    # 코드펜스 허용하지 않는 프롬프트지만 방어.
+    if text.startswith('```'):
+        text = text.strip('`')
+        if text.lower().startswith('json'):
+            text = text[4:]
+    # 첫 { ~ 마지막 } 구간.
+    start = text.find('{')
+    end = text.rfind('}')
+    if start < 0 or end <= start:
+        return None
+    try:
+        parsed = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+def _merge_llm_output(
+    extracted: dict[str, Any],
+    llm_output: dict[str, Any],
+    schema: Mapping[str, FieldSpec],
+) -> None:
+    """LLM 이 돌려준 값을 스키마 규칙에 맞춰 `extracted` 에 반영."""
+    for name, value in llm_output.items():
+        if name not in schema or name in extracted:
+            continue
+        spec = schema[name]
+        if spec.type == 'enum':
+            # 정규화된 key 만 허용.
+            if isinstance(value, str) and value in spec.enum_values:
+                extracted[name] = value
+            continue
+        if spec.type in ('number', 'money'):
+            try:
+                extracted[name] = int(value)
+            except (TypeError, ValueError):
+                continue
+            continue
+        if spec.type == 'number_list':
+            if isinstance(value, list):
+                ints: list[int] = []
+                for v in value:
+                    try:
+                        ints.append(int(v))
+                    except (TypeError, ValueError):
+                        continue
+                if ints:
+                    extracted[name] = ints
+            continue
+        # date / text — 문자열로만 받는다.
+        if isinstance(value, str) and value.strip():
+            extracted[name] = value.strip()
+
+
+def _tail_history(history: list, max_messages: int) -> list:
+    if not history:
+        return []
+    trimmed = [
+        msg for msg in history
+        if msg.get('role') in ('user', 'assistant') and msg.get('content')
+    ]
+    return trimmed[-max_messages:]
 
 
 # ---------------------------------------------------------------------------

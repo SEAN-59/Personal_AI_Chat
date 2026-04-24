@@ -1,9 +1,22 @@
-"""Phase 6-2 workflow_input_extractor 단위 테스트 — regex/토큰 경로."""
+"""Phase 6-2 workflow_input_extractor 단위 테스트."""
+
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
 from chat.services.workflow_input_extractor import extract
 from chat.workflows.domains.field_spec import FieldSpec
+
+
+def _mock_llm_off():
+    """LLM fallback 를 실제로 호출하지 않도록 막는 patch helper.
+
+    regex 경로만 검증하는 테스트는 이 patch 하에서 돌린다.
+    """
+    return patch(
+        'chat.services.workflow_input_extractor._call_llm_extractor',
+        return_value=(None, None, None),
+    )
 
 
 _DATE_SCHEMA = {
@@ -34,6 +47,7 @@ _AMOUNT_SCHEMA = {
 
 class ExtractBasicShapeTests(SimpleTestCase):
     def test_empty_schema_returns_empty_dict(self):
+        # LLM 경로 자체가 스킵된다는 의미로, 모든 required 가 없으므로 LLM 미호출.
         out, usage, model = extract('1 + 2', [], {})
         self.assertEqual(out, {})
         self.assertIsNone(usage)
@@ -41,6 +55,11 @@ class ExtractBasicShapeTests(SimpleTestCase):
 
 
 class ExtractDateSchemaTests(SimpleTestCase):
+    def setUp(self):
+        self._llm_patch = _mock_llm_off()
+        self._llm_patch.start()
+        self.addCleanup(self._llm_patch.stop)
+
     def test_two_iso_dates_assigned_in_declaration_order(self):
         out, *_ = extract(
             '2025-01-01 부터 2025-02-01 까지 며칠이야?',
@@ -71,13 +90,19 @@ class ExtractDateSchemaTests(SimpleTestCase):
         )
         self.assertEqual(out.get('unit'), 'days')
 
-    def test_missing_one_date_leaves_field_absent(self):
+    def test_missing_one_date_leaves_field_absent_when_llm_unavailable(self):
         out, *_ = extract('2024-01-01 이후 며칠?', [], _DATE_SCHEMA)
         self.assertEqual(out.get('start'), '2024-01-01')
+        # LLM fallback 이 막혀있으므로 end 는 비어야 한다.
         self.assertNotIn('end', out)
 
 
 class ExtractAmountSchemaTests(SimpleTestCase):
+    def setUp(self):
+        self._llm_patch = _mock_llm_off()
+        self._llm_patch.start()
+        self.addCleanup(self._llm_patch.stop)
+
     def test_money_values_collected_into_list(self):
         out, *_ = extract(
             '1,000원과 2,000원과 3,000원 합계는?',
@@ -101,6 +126,11 @@ class ExtractAmountSchemaTests(SimpleTestCase):
 
 
 class ExtractMoneyMaskingTests(SimpleTestCase):
+    def setUp(self):
+        self._llm_patch = _mock_llm_off()
+        self._llm_patch.start()
+        self.addCleanup(self._llm_patch.stop)
+
     def test_money_field_takes_priority_over_number_field(self):
         schema = {
             'price': FieldSpec(type='money'),
@@ -118,3 +148,82 @@ class ExtractMoneyMaskingTests(SimpleTestCase):
         out, *_ = extract('1,000원 외에도 50 60 70', [], schema)
         self.assertEqual(out.get('price'), 1000)
         self.assertEqual(out.get('values'), [50, 60, 70])
+
+
+class _UsageStub:
+    prompt_tokens = 10
+    completion_tokens = 5
+    total_tokens = 15
+
+
+class LLMFallbackTests(SimpleTestCase):
+    """LLM 이 regex 가 놓친 필드를 채워주는 시나리오."""
+
+    def test_llm_fills_missing_required_field(self):
+        # start 만 찍혀 있고 end 는 LLM 이 보강한다.
+        with patch(
+            'chat.services.workflow_input_extractor.run_chat_completion',
+            return_value=('{"end": "2024-03-01"}', _UsageStub(), 'gpt-4o-mini'),
+        ), patch(
+            'chat.services.workflow_input_extractor.load_prompt',
+            return_value='PROMPT',
+        ):
+            out, usage, model = extract(
+                '2024-01-01 이후로 며칠?',
+                [{'role': 'user', 'content': '종료일은 2024-03-01 로 해줘'}],
+                _DATE_SCHEMA,
+            )
+        self.assertEqual(out['start'], '2024-01-01')
+        self.assertEqual(out['end'], '2024-03-01')
+        self.assertIs(usage, None if usage is None else usage)  # 체크가 목적이 아니라 값 있음만.
+        self.assertEqual(model, 'gpt-4o-mini')
+
+    def test_llm_failure_keeps_regex_only_result(self):
+        with patch(
+            'chat.services.workflow_input_extractor.run_chat_completion',
+            side_effect=__import__(
+                'chat.services.single_shot.types', fromlist=['QueryPipelineError'],
+            ).QueryPipelineError('boom'),
+        ), patch(
+            'chat.services.workflow_input_extractor.load_prompt',
+            return_value='PROMPT',
+        ):
+            out, usage, model = extract(
+                '2024-01-01 이후로 며칠?',
+                [],
+                _DATE_SCHEMA,
+            )
+        self.assertEqual(out.get('start'), '2024-01-01')
+        self.assertNotIn('end', out)
+        self.assertIsNone(usage)
+        self.assertIsNone(model)
+
+    def test_llm_json_garbage_ignored(self):
+        with patch(
+            'chat.services.workflow_input_extractor.run_chat_completion',
+            return_value=('not json at all', _UsageStub(), 'gpt-4o-mini'),
+        ), patch(
+            'chat.services.workflow_input_extractor.load_prompt',
+            return_value='PROMPT',
+        ):
+            out, usage, model = extract(
+                '2024-01-01 이후로 며칠?',
+                [],
+                _DATE_SCHEMA,
+            )
+        self.assertNotIn('end', out)
+        # 호출이 실제 일어났고 usage 는 기록해도 무방 (실패지만 호출 비용은 소비됨).
+        self.assertEqual(model, 'gpt-4o-mini')
+
+    def test_llm_ignored_when_enum_outside_allowed_keys(self):
+        with patch(
+            'chat.services.workflow_input_extractor.run_chat_completion',
+            return_value=('{"end": "2024-03-01", "unit": "weeks"}', _UsageStub(), 'gpt-4o-mini'),
+        ), patch(
+            'chat.services.workflow_input_extractor.load_prompt',
+            return_value='PROMPT',
+        ):
+            out, *_ = extract('2024-01-01 부터 며칠?', [], _DATE_SCHEMA)
+        # default='days' 가 먼저 채워졌으므로 LLM 의 'weeks' 는 무시되고 바뀌지 않는다.
+        self.assertEqual(out.get('unit'), 'days')
+        self.assertEqual(out.get('end'), '2024-03-01')
