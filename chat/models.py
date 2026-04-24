@@ -176,6 +176,16 @@ class RouterRule(models.Model):
             '※ 변형이 많으면 짧게 쪼개서 여러 규칙으로 등록하는 편이 안전합니다.'
         ),
     )
+    workflow_key = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text=(
+            'route 가 "workflow" 일 때만 의미가 있습니다.\n'
+            '어떤 generic workflow 로 보낼지 선택하세요 (Phase 6 부터).\n'
+            '비워두면 workflow 경로이더라도 기존처럼 single_shot 으로 응답합니다.'
+        ),
+    )
     priority = models.IntegerField(
         default=100,
         help_text=(

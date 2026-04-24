@@ -27,10 +27,13 @@ class GraphState(TypedDict, total=False):
 
     # ─── router 결과 ──────────────────────────────────
     # Phase 4-1 기준: 'single_shot' / 'workflow' / 'agent' (chat.graph.routes 참조).
-    # workflow/agent 는 현재 conditional edge 에서 single_shot 노드로 fallback.
+    # Phase 6-1 부터 workflow 경로에는 workflow_key 가 함께 실려 내려가고,
+    # workflow_node 가 이 값을 registry 에 조회해 실제 domain workflow 를 고른다.
+    # key 가 비었거나 등록된 값이 아니면 workflow_node 는 single_shot 으로 폴백.
     route: str
-    route_reason: str            # 'workflow_keyword' / 'agent_keyword' / 'default'
+    route_reason: str            # 'workflow_keyword' / 'agent_keyword' / 'default' / 'db_rule:<name>'
     matched_rules: list[str]     # 매치된 키워드(있을 경우)
+    workflow_key: str            # Phase 6-1: 선택된 generic workflow key (비어있을 수 있음)
 
     # ─── 실행 결과 ────────────────────────────────────
     result: Optional[QueryResult]

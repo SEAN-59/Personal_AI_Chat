@@ -18,12 +18,33 @@ from chat.models import RouterRule
 from chat.services.question_router import AGENT_KEYWORDS, WORKFLOW_KEYWORDS
 
 
+def _workflow_key_choices():
+    """registry 에 등록된 workflow 를 드롭다운 옵션으로 변환.
+
+    빈 값("") 을 첫 옵션으로 허용 — `route='workflow'` 라도 key 미지정 시
+    workflow_node 가 single_shot 으로 폴백하므로 의도된 기본값.
+    """
+    from chat.workflows.domains import registry
+    options = [('', '— 선택 안 함 (single_shot 으로 폴백) —')]
+    for entry in registry.all_entries():
+        label = f'{entry.title} ({entry.key})'
+        options.append((entry.key, label))
+    return options
+
+
 class RouterRuleForm(forms.ModelForm):
     """새 rule 생성 / 기존 rule 편집 공용 폼.
 
     모든 위젯에 bo.css 의 `.input` 클래스를 주입해 디자인 가이드 Form 규격을
     그대로 적용한다 (guide §Form / bo.css FORM 섹션).
     """
+
+    workflow_key = forms.ChoiceField(
+        required=False,
+        label='Workflow',
+        help_text=RouterRule._meta.get_field('workflow_key').help_text,
+        widget=forms.Select(attrs={'class': 'input'}),
+    )
 
     class Meta:
         model = RouterRule
@@ -32,6 +53,7 @@ class RouterRuleForm(forms.ModelForm):
             'route',
             'match_type',
             'pattern',
+            'workflow_key',
             'priority',
             'enabled',
             'description',
@@ -45,6 +67,12 @@ class RouterRuleForm(forms.ModelForm):
             'description': forms.Textarea(attrs={'class': 'input', 'rows': 3}),
             # enabled 는 체크박스 — `.input` 을 적용하면 스타일이 깨진다.
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # registry 는 앱 로드 시 import 부작용으로 채워지므로, __init__ 시점에
+        # 조회해 choices 를 채운다. 빈 값 포함.
+        self.fields['workflow_key'].choices = _workflow_key_choices()
 
 
 def router_rules_index(request):
