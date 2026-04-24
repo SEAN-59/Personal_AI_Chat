@@ -69,6 +69,27 @@ def all_entries() -> Iterable[WorkflowEntry]:
     return tuple(_REGISTRY.values())
 
 
+def _snapshot_for_tests() -> dict[str, WorkflowEntry]:
+    """테스트 격리 헬퍼. 현재 레지스트리의 얕은 복사를 돌려준다.
+
+    테스트는 setUp 에서 snapshot 을 찍고, tearDown 에서 그대로 되돌린다. 이렇게
+    해야 `_reset_for_tests()` 를 부른 뒤에도 import 부작용으로 등록된 기본
+    엔트리들이 다른 테스트에 되살아난 상태로 넘어간다.
+    """
+    return dict(_REGISTRY)
+
+
+def _restore_for_tests(snapshot: dict[str, WorkflowEntry]) -> None:
+    """테스트 전용. `_snapshot_for_tests` 로 찍어둔 상태를 복원."""
+    _REGISTRY.clear()
+    _REGISTRY.update(snapshot)
+
+
 def _reset_for_tests() -> None:
-    """테스트 전용. 프로덕션 코드에서 호출 금지."""
+    """테스트 전용 — 레지스트리를 완전히 비운다.
+
+    테스트가 자체 엔트리만으로 격리된 상태를 원할 때 쓴다. 이 호출 후에는
+    반드시 tearDown 에서 `_restore_for_tests(snapshot)` 로 되돌려야 다른
+    테스트가 실패하지 않는다.
+    """
     _REGISTRY.clear()

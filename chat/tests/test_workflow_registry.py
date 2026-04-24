@@ -22,12 +22,13 @@ def _dummy_workflow_factory():
 
 class RegistryTests(SimpleTestCase):
     def setUp(self):
+        # 다른 테스트가 의존하는 부팅 시 등록된 엔트리를 잃지 않도록 snapshot 으로
+        # 복구한다. 레지스트리는 프로세스 싱글톤이라 반드시 복원해야 안전.
+        self._snapshot = registry._snapshot_for_tests()
         registry._reset_for_tests()
 
     def tearDown(self):
-        # 테스트 간 격리. 실제 부팅 시 등록되는 엔트리는 프로세스 종료까지 유지되지만
-        # 단위 테스트에서는 매번 비워두고 써야 한다.
-        registry._reset_for_tests()
+        registry._restore_for_tests(self._snapshot)
 
     def test_register_and_lookup(self):
         entry = registry.WorkflowEntry(

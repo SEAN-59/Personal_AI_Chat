@@ -23,6 +23,7 @@ class _AdderWorkflow:
 
 class DispatchTests(SimpleTestCase):
     def setUp(self):
+        self._snapshot = registry._snapshot_for_tests()
         registry._reset_for_tests()
         registry.register(registry.WorkflowEntry(
             key='adder',
@@ -33,7 +34,7 @@ class DispatchTests(SimpleTestCase):
         ))
 
     def tearDown(self):
-        registry._reset_for_tests()
+        registry._restore_for_tests(self._snapshot)
 
     def test_run_happy_path(self):
         result = dispatch.run('adder', {'a': 1, 'b': 2})
