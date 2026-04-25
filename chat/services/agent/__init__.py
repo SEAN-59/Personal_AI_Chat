@@ -19,3 +19,8 @@ single_shot 으로 폴백된다 (Phase 4-1 동작 그대로). 실제 graph wirin
 설계 문서: `resources/plans/2.0.0_Phase 7_Agent_개발_설계.md`.
 플랜 문서: `resources/plans/detail/2.0.0_Phase 7-1_agent_runtime_개발_플랜.md`.
 """
+
+# tools_builtin 은 import 시점에 세 도구를 registry 에 등록하는 부작용을 갖는다
+# (chat.workflows.domains.general 패턴과 동일). 이 패키지를 import 하는 순간
+# `tools.all_entries()` 가 채워진다.
+from chat.services.agent import tools_builtin  # noqa: F401
