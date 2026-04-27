@@ -92,17 +92,18 @@ class RunAgentTests(SimpleTestCase):
         self.assertEqual(r.status, WorkflowStatus.OK)
         self.assertEqual(r.value, '결과')
 
-    def test_max_iterations_exceeded_returns_upstream_error(self):
-        # max_iterations 만큼 도구만 부르고 final_answer 를 안 내면 종료.
-        # 인자를 모두 다르게 줘서 MAX_REPEATED_CALL 가드가 먼저 걸리지 않게 한다.
+    def test_max_iterations_exceeded_returns_not_found(self):
+        # Phase 7-4: max_iterations 도달은 NOT_FOUND 로 매핑 (UPSTREAM_ERROR 아님).
+        # 인자를 모두 다르게 줘서 MAX_REPEATED_CALL / low_relevance 가드가 먼저
+        # 걸리지 않게 한다 (dummy 도구는 failure_check 미지정 → low_relevance 0).
         replies = [
             f'{{"thought": "또 검색", "action": "dummy", "arguments": {{"query": "q{i}"}}}}'
             for i in range(DEFAULT_MAX_ITERATIONS)
         ]
         with self._patch_prompt(), self._patch_record(), self._patch(replies):
             r = react.run_agent('Q', history=[], max_iterations=DEFAULT_MAX_ITERATIONS)
-        self.assertEqual(r.status, WorkflowStatus.UPSTREAM_ERROR)
-        self.assertIn('도구를 너무 많이', r.details['reason'])
+        self.assertEqual(r.status, WorkflowStatus.NOT_FOUND)
+        self.assertIn('더 구체적인 질문', r.details['reason'])
 
     def test_repeated_same_call_terminates_with_not_found(self):
         # Phase 7-4: 동일 (tool, args) 차단 + consecutive_failures 누적.
@@ -113,7 +114,7 @@ class RunAgentTests(SimpleTestCase):
         with self._patch_prompt(), self._patch_record(), self._patch(replies):
             r = react.run_agent('Q', history=[])
         self.assertEqual(r.status, WorkflowStatus.NOT_FOUND)
-        self.assertIn('남지 않아', r.details['reason'])
+        self.assertIn('자료를 찾을 수 없었습니다', r.details['reason'])
 
     def test_consecutive_tool_failures_trigger_no_more_useful_tools(self):
         # 도구 callable 이 매번 raise → Observation 이 모두 is_failure.
