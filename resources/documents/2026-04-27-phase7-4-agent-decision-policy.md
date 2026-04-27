@@ -247,15 +247,34 @@ docker compose exec -T web python manage.py check
 
 **362/362 green**. 7-3 의 windowing 테스트 17건 한 건도 깨지지 않음 (`_focus_window` 외부 동작 변경 0).
 
-### 사용자-facing smoke (수동)
+### 사용자-facing smoke 결과
 
 7-3 시점 smoke 룰 그대로 (`비교` / `더 유리`).
 
-| 시나리오 | 7-3 결과 | 7-4 기대 |
-|---|---|---|
-| `우주여행 비교` | UPSTREAM_ERROR | (a) 마커 보고 1~2 step 내 final_answer (status=OK + "자료 못 찾았다") / (b) LLM 이 마커 무시하고 query 변형 반복 → 누적 가드 발동 → status=NOT_FOUND. **invariant**: max_iter 도달 안 함 |
-| `복리후생 규정 비교` | NOT_FOUND (max_repeated) | (a) recent tool calls + No call repetition 보고 final_answer / (b) 같은 args 시도 → runtime guard 차단 → consecutive_failures 한도 → NOT_FOUND. **invariant**: 동일 (tool, args) 실제 retrieve 재실행 0 |
-| `결혼 경조금 비교` (정상) | OK + 비교 답변 | OK + 비교 답변 (회귀 0) |
+| 시나리오 | 7-3 결과 | 7-4 결과 | 정상? |
+|---|---|---|---|
+| `우주여행 비교` | UPSTREAM_ERROR ("도구를 너무 많이...") | NOT_FOUND + "질문에 맞는 자료를 찾을 수 없었습니다..." | ✓ low_relevance 누적 가드 발동 |
+| `복리후생 규정 비교` | NOT_FOUND (max_repeated) | NOT_FOUND + "충분한 답을 만들지 못했습니다. 더 구체적인 질문으로..." | ✓ broad query — 카피로 사용자 안내 |
+| `결혼 경조금 비교` (broad) | OK 또는 NOT_FOUND (확률적) | NOT_FOUND + "충분한 답을 만들지 못했습니다..." | ✓ 모호한 query — 안내 |
+| `결혼 경조금이랑 자녀 결혼 경조금 비교해줘` (specific) | OK + 비교 답변 | OK + 비교 답변 | ✓ 회귀 0 |
+| `우주여행 비용 비교` | UPSTREAM_ERROR | NOT_FOUND + "찾을 수 없었습니다..." | ✓ P2-1 핵심 (longest meaningful 미매치) |
+
+### Smoke 에서 발견한 UX 이슈와 보강
+
+**현상**: 시나리오 2 / 짧은 시나리오 3 같은 broad query 에서 retrieve 마다 same-domain 청크 (예: `복리후생 규정.pdf` 첫 페이지) 가 첫 hit 으로 반복 noun. 의미 매치 True 라 low_relevance 가드 안 걸림 → max_iter=6 도달 → 이전 정책에선 UPSTREAM_ERROR.
+
+**문제**: UPSTREAM_ERROR 의 "잠시 후 다시 시도" 카피가 부정확 — 같은 query 재시도해도 동일 결과 (LLM 결정 부족).
+
+**보강 (이 PR 내 추가 커밋)**:
+- `to_workflow_result`: `MAX_ITERATIONS_EXCEEDED` 매핑을 `UPSTREAM_ERROR` → **`NOT_FOUND`** 로 변경. FATAL_ERROR (LLM/네트워크 일시 오류) 만 진짜 UPSTREAM_ERROR.
+- `_DEFAULT_REASONS` 카피 정밀화:
+  - `MAX_ITERATIONS_EXCEEDED`: "**충분한 답을 만들지 못했습니다. 더 구체적인 질문으로 다시 물어봐 주세요.**"
+  - `NO_MORE_USEFUL_TOOLS`: "**질문에 맞는 자료를 찾을 수 없었습니다. 질문을 다시 한 번 확인해 주세요.**"
+  - `INSUFFICIENT_EVIDENCE`: "관련 자료를 충분히 확인하지 못했습니다. 질문을 다시 한 번 확인해 주세요."
+
+이 변경으로 broad/모호 query 에 대한 사용자 응답이 "잠시 후 재시도" (부정확) 가 아니라 **"질문 다시 다듬어 주세요"** 라는 정확한 안내가 됨.
+
+**알려진 한계 (Phase 8+ 후보)**: broad query 에서 LLM 이 retrieve 만 6 step 채우는 패턴 자체는 알고리즘적으로 막지 않음 — content overlap 검출 / 더 강한 프롬프트 압박은 별 PR 의 일.
 
 ---
 
