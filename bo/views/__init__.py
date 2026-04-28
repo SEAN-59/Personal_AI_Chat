@@ -22,3 +22,4 @@ from .router_rules import (
     router_rules_toggle,
     router_rules_delete,
 )
+from .agent import agent_view
