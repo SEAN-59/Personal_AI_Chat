@@ -11,11 +11,17 @@ conflict detection / 변경 이력은 다루지 않는다 (설계 §5-6 out-of-s
 
 from django import forms
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from chat.models import RouterRule
 from chat.services.question_router import AGENT_KEYWORDS, WORKFLOW_KEYWORDS
+
+
+# 페이지당 RouterRule 수 — 운영자가 한 화면에서 훑기 좋은 양 + 코드 키워드
+# 박스가 너무 멀어지지 않을 정도. files / qa_logs 의 패턴과 동일하게 모듈 상수.
+RULES_PER_PAGE = 10
 
 
 def _workflow_key_choices():
@@ -81,10 +87,17 @@ def router_rules_index(request):
     기본 키워드는 question_router 의 fallback 레이어 — DB rule 이 매치되지
     않을 때 실제 분류를 담당. 운영자가 'BO 가 비어도 기본 동작은 무엇인가' 를
     확인할 수 있도록 접이식 섹션으로 함께 노출한다. 수정은 코드에서만 가능.
+
+    Phase 8-3: rule 누적 시 한 화면이 너무 길어지므로 10개 단위 페이지네이션
+    (`files` / `qa_logs` 패턴 동일).
     """
+    paginator = Paginator(RouterRule.objects.all(), RULES_PER_PAGE)
+    page_obj = paginator.get_page(request.GET.get('page'))
     context = {
         'section': 'router_rules',
-        'rules': RouterRule.objects.all(),
+        'rules': page_obj,                 # 템플릿에서 for 순회 시 현재 페이지 항목
+        'page_obj': page_obj,              # 페이지네이션 컨트롤용
+        'total_count': paginator.count,
         'workflow_keywords': WORKFLOW_KEYWORDS,
         'agent_keywords': AGENT_KEYWORDS,
     }
