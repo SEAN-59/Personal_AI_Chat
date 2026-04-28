@@ -89,7 +89,7 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
   }
-  [data-bulk-page="router"] [data-bulk-toolbar] [data-bulk-count] {
+  [data-bulk-page="router"] [data-bulk-toolbar] .bulk-count {
     margin-left: auto;
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
@@ -165,7 +165,7 @@
             data-bulk-action
             data-bulk-confirm="선택한 규칙을 모두 삭제하시겠습니까?"
             disabled>선택 삭제</button>
-    <span><span data-bulk-count>0</span>개 선택됨</span>
+    <span class="bulk-count"><span data-bulk-count>0</span>개 선택됨</span>
   </div>
 
   <section class="card" style="padding: 0;">
