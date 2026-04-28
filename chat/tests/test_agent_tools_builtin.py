@@ -539,6 +539,91 @@ class HasMeaningfulMatchTests(SimpleTestCase):
         # query 자체가 모두 low-signal → 정보량 부족.
         self.assertFalse(_has_meaningful_match('어떤 비교 자료', '비교 알려줘'))
 
+    # ---------- Phase 8-4: 시간/숫자 토큰 거부 + 조사/접미 ----------
+
+    def test_pure_time_unit_tokens_returns_false(self):
+        # `2025년` / `100일` / `1월` 만 의미 토큰으로 보이는 청크 — 무관 PDF 시뮬.
+        # query 의 모든 의미 토큰이 시간 단위라 meaningful tier 가 비어 False.
+        content = '시행일 2025년 발효 본 정책은 1월 1일부터 100일' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '2025년 100일 1월'))
+
+    def test_year_token_alone_returns_false(self):
+        content = '2025년 시행 본 규정은' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '2025년 발표'))
+
+    def test_month_token_alone_returns_false(self):
+        # query 의 의미 토큰이 `1월` 뿐 (low-signal) → meaningful 비어 False.
+        content = '1월 1일 회의록' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '1월 일정'))
+
+    def test_particle_suffixed_day_token_returns_false(self):
+        # P2 핵심 — `1일부터` 가 longest meaningful 이 되면 안 됨.
+        content = '본 정책은 1일부터 적용' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '1일부터 100일'))
+
+    def test_particle_suffixed_until_token_returns_false(self):
+        content = '회의는 100일까지 진행됩니다' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '100일까지 일정'))
+
+    def test_particle_suffixed_year_token_returns_false(self):
+        # query 의 의미 토큰이 `2025년부터` 뿐 (low-signal) → meaningful 비어 False.
+        content = '2025년부터 적용' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '2025년부터 어떻게'))
+
+    def test_currency_unit_alone_returns_false(self):
+        # `50만원` 같은 화폐 단위만 매치되고 도메인 명사 없음.
+        content = '회의비 50만원 청구' + 'a' * 100
+        self.assertFalse(_has_meaningful_match(content, '50만원 한도'))
+
+    def test_domain_noun_with_currency_returns_true(self):
+        # `복리후생` 같은 도메인 명사가 longest meaningful — currency 와 무관.
+        content = '복리후생 항목별 50만원' + 'a' * 100
+        self.assertTrue(_has_meaningful_match(content, '복리후생 50만원'))
+
+    def test_a_triple_prime_exact_query_blocks_unrelated_chunk(self):
+        # 시나리오 A''' 직접 회귀 가드. 무관 PDF (개인정보 처리방침 류) 청크에
+        # 시간 토큰만 매치 → False → low_relevance failure → sources 잡음 차단.
+        content = (
+            '본 처리방침은 2025년 1월 1일부터 시행한다. 본 회사는 100일 이내'
+            '회원 동의를 다시 받는다. 시행 날짜는 별도 공지'
+        ) + 'a' * 100
+        self.assertFalse(
+            _has_meaningful_match(content, '2025년 1월 1일부터 100일 후 날짜는?'),
+        )
+
+
+class IsLowSignalTests(SimpleTestCase):
+    """Phase 8-4 — `_is_low_signal` helper 단위."""
+
+    def test_known_word_token_returns_true(self):
+        from chat.services.agent.tools_builtin import _is_low_signal
+        self.assertTrue(_is_low_signal('비교'))
+        self.assertTrue(_is_low_signal('얼마'))
+        self.assertTrue(_is_low_signal('날짜'))      # 8-4 추가 단어
+        self.assertTrue(_is_low_signal('compare'))   # 영문 — 대소문자 무관
+
+    def test_simple_numeric_unit_pattern_returns_true(self):
+        from chat.services.agent.tools_builtin import _is_low_signal
+        self.assertTrue(_is_low_signal('2025년'))
+        self.assertTrue(_is_low_signal('100일'))
+        self.assertTrue(_is_low_signal('50만원'))
+
+    def test_particle_suffixed_pattern_returns_true(self):
+        from chat.services.agent.tools_builtin import _is_low_signal
+        self.assertTrue(_is_low_signal('1일부터'))
+        self.assertTrue(_is_low_signal('100일까지'))
+        self.assertTrue(_is_low_signal('2025년부터'))
+        self.assertTrue(_is_low_signal('날짜는'))     # 8-4 regex 일반화
+        self.assertTrue(_is_low_signal('기간이'))
+
+    def test_domain_noun_returns_false(self):
+        from chat.services.agent.tools_builtin import _is_low_signal
+        # 도메인 명사 — regex anchor `^...$` 가 부분 매치 차단.
+        self.assertFalse(_is_low_signal('복리후생'))
+        self.assertFalse(_is_low_signal('경조금'))
+        self.assertFalse(_is_low_signal('30년근속'))   # 시간 단위 + 명사 결합
+        self.assertFalse(_is_low_signal('우주여행'))
+
 
 class RetrieveSummaryRelevanceMarkerTests(SimpleTestCase):
     """`_summarize_retrieve` 의 [관련성 낮음] / 머리 마커 회귀 — Phase 7-4."""

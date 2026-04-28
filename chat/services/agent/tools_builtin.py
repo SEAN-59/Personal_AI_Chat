@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import string
 from typing import Any, List, Mapping
 
@@ -36,6 +37,11 @@ _KEYWORD_MIN_LEN = 2
 # Phase 7-4: relevance 마커 판정에서 제외할 일반 토큰. windowing 매치는 이 토큰도
 # 후보로 쓰지만 (자리 잡기에는 유용), 관련성 신호로는 부족 — 짧은 의문/비교/요청
 # 표현이 우연히 매치돼 false relevant 가 되는 회귀 차단용.
+#
+# Phase 8-4: 시간/단위 단어 추가 (`년` `월` `일` `시` ...). 시나리오 A''' 의
+# `2025년 1월 1일부터 100일 후 날짜는?` 같은 query 가 시간 토큰만 의미 토큰으로
+# 남아 임의 PDF 와 매치하던 false positive 차단. `날짜` / `기간` 도 추가 — 도메인
+# 명사가 아니라 일반 시간 표현.
 _LOW_SIGNAL_TOKENS = frozenset({
     # 비교/연산 의도
     '비교', '차이', '차이점', '대비',
@@ -44,9 +50,51 @@ _LOW_SIGNAL_TOKENS = frozenset({
     '알려', '알려줘', '말해', '말해줘',
     # 일반 지시
     '관련', '대해', '대한',
+    # 시간/단위 일반어 (Phase 8-4)
+    '년', '월', '일', '시', '분', '초', '주', '개월', '분기', '반기', '시간', '기간', '날짜',
     # 영문 일반어
     'compare', 'difference', 'about', 'what', 'how',
 })
+
+
+# Phase 8-4: 한국어 자주 쓰이는 조사/접미. 모든 시간·수량 regex 패턴에 부착해
+# `1일부터` / `100일까지` / `날짜는` 같이 조사 붙은 토큰도 잡는다. `_tokenize_query`
+# 가 조사 분리를 안 하므로 여기서 패턴 차원에서 흡수.
+_PARTICLE_SUFFIX = r'(은|는|이|가|을|를|에|의|도|만|로|으로|부터|까지)?'
+
+# Phase 8-4: 숫자+단위 + 조사 suffix 일반화. enumeration 으로는 `2025년` / `1년` /
+# `100년` 모두 등록 못 하므로 regex 로. anchor `^...$` 로 부분 매치 방지 (`30년근속`
+# 같은 도메인 명사는 의미 토큰 그대로 인정).
+_LOW_SIGNAL_PATTERNS: tuple[re.Pattern, ...] = tuple(
+    re.compile(p) for p in (
+        rf'^\d+년{_PARTICLE_SUFFIX}$',
+        rf'^\d+월{_PARTICLE_SUFFIX}$',
+        rf'^\d+일{_PARTICLE_SUFFIX}$',
+        rf'^\d+시{_PARTICLE_SUFFIX}$',
+        rf'^\d+분{_PARTICLE_SUFFIX}$',
+        rf'^\d+초{_PARTICLE_SUFFIX}$',
+        rf'^\d+(개월|주|분기|반기|시간){_PARTICLE_SUFFIX}$',
+        rf'^\d+(원|만원|억|조){_PARTICLE_SUFFIX}$',
+        # `날짜` / `기간` 의 조사 일반화 — `_LOW_SIGNAL_TOKENS` 의 base 단어가
+        # 이미 들어있어도 `날짜는` 같은 변형은 멤버십으로 못 잡음.
+        rf'^날짜{_PARTICLE_SUFFIX}$',
+        rf'^기간{_PARTICLE_SUFFIX}$',
+    )
+)
+
+
+def _is_low_signal(token: str) -> bool:
+    """Phase 8-4: 토큰이 low-signal 인지 판정.
+
+    `_LOW_SIGNAL_TOKENS` 멤버십 OR `_LOW_SIGNAL_PATTERNS` 매치 둘 중 하나면 True.
+    `_has_meaningful_match` 가 직접 멤버십 검사 대신 본 helper 호출.
+    """
+    if token.lower() in _LOW_SIGNAL_TOKENS:
+        return True
+    for pattern in _LOW_SIGNAL_PATTERNS:
+        if pattern.match(token):
+            return True
+    return False
 
 
 def _tokenize_query(query: str) -> List[str]:
@@ -118,7 +166,7 @@ def _has_meaningful_match(content: str, query: str) -> bool:
     if not content or not query:
         return False
     tokens = _tokenize_query(query)
-    meaningful = [t for t in tokens if t.lower() not in _LOW_SIGNAL_TOKENS]
+    meaningful = [t for t in tokens if not _is_low_signal(t)]
     if not meaningful:
         return False
     max_len = len(meaningful[0])  # tokens already sorted len desc
