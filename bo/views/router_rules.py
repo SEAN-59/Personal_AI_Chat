@@ -163,3 +163,52 @@ def router_rules_delete(request, pk: int):
     rule.delete()
     messages.success(request, f'규칙 "{name}" 를 삭제했습니다.')
     return redirect('bo:router_rules')
+
+
+# ---------------------------------------------------------------------------
+# 일괄 액션 (Phase 8-3 운영자 피드백)
+# ---------------------------------------------------------------------------
+
+def _bulk_ids(request) -> list[int]:
+    """`ids` POST list 를 정수로 안전 변환. 잘못된 토큰은 무시."""
+    raw = request.POST.getlist('ids')
+    out: list[int] = []
+    for v in raw:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+@require_POST
+def router_rules_bulk_enable(request):
+    ids = _bulk_ids(request)
+    if not ids:
+        messages.warning(request, '선택된 규칙이 없습니다.')
+        return redirect('bo:router_rules')
+    count = RouterRule.objects.filter(pk__in=ids, enabled=False).update(enabled=True)
+    messages.success(request, f'{count}건을 활성화했습니다.')
+    return redirect('bo:router_rules')
+
+
+@require_POST
+def router_rules_bulk_disable(request):
+    ids = _bulk_ids(request)
+    if not ids:
+        messages.warning(request, '선택된 규칙이 없습니다.')
+        return redirect('bo:router_rules')
+    count = RouterRule.objects.filter(pk__in=ids, enabled=True).update(enabled=False)
+    messages.success(request, f'{count}건을 비활성화했습니다.')
+    return redirect('bo:router_rules')
+
+
+@require_POST
+def router_rules_bulk_delete(request):
+    ids = _bulk_ids(request)
+    if not ids:
+        messages.warning(request, '선택된 규칙이 없습니다.')
+        return redirect('bo:router_rules')
+    count, _ = RouterRule.objects.filter(pk__in=ids).delete()
+    messages.success(request, f'{count}건을 삭제했습니다.')
+    return redirect('bo:router_rules')

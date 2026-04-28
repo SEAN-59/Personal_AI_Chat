@@ -83,3 +83,71 @@ class AgentSettingsViewTests(TestCase):
         response = self.client.get(url)
         # 'section' 컨텍스트는 직접 확인 어렵지만 url_name 이 `agent` 인지 확인.
         self.assertEqual(response.resolver_match.url_name, 'agent')
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class RouterRulesBulkActionsTests(TestCase):
+    """Phase 8-3 — RouterRule 일괄 액션 (활성화 / 비활성화 / 삭제) 회귀."""
+
+    def setUp(self):
+        from chat.models import RouterRule
+        self.r1 = RouterRule.objects.create(
+            name='r1', route='agent', match_type='contains',
+            pattern='비교', priority=100, enabled=True,
+        )
+        self.r2 = RouterRule.objects.create(
+            name='r2', route='workflow', match_type='contains',
+            pattern='날짜', priority=100, enabled=True,
+        )
+        self.r3 = RouterRule.objects.create(
+            name='r3', route='single_shot', match_type='contains',
+            pattern='안녕', priority=100, enabled=False,
+        )
+
+    def test_bulk_enable_activates_selected(self):
+        url = reverse('bo:router_rules_bulk_enable')
+        response = self.client.post(url, {'ids': [str(self.r3.pk), str(self.r1.pk)]})
+
+        self.assertRedirects(response, reverse('bo:router_rules'))
+        self.r3.refresh_from_db()
+        self.assertTrue(self.r3.enabled)
+        # r1 은 이미 enabled=True 라 update 영향 없음 (count 1).
+
+    def test_bulk_disable_deactivates_selected(self):
+        url = reverse('bo:router_rules_bulk_disable')
+        response = self.client.post(url, {'ids': [str(self.r1.pk), str(self.r2.pk)]})
+
+        self.assertRedirects(response, reverse('bo:router_rules'))
+        self.r1.refresh_from_db()
+        self.r2.refresh_from_db()
+        self.assertFalse(self.r1.enabled)
+        self.assertFalse(self.r2.enabled)
+
+    def test_bulk_delete_removes_selected(self):
+        from chat.models import RouterRule
+        url = reverse('bo:router_rules_bulk_delete')
+        response = self.client.post(url, {'ids': [str(self.r1.pk), str(self.r3.pk)]})
+
+        self.assertRedirects(response, reverse('bo:router_rules'))
+        # r2 만 남아야 함.
+        remaining = list(RouterRule.objects.values_list('pk', flat=True))
+        self.assertEqual(remaining, [self.r2.pk])
+
+    def test_bulk_action_with_empty_ids_warns_and_redirects(self):
+        url = reverse('bo:router_rules_bulk_delete')
+        response = self.client.post(url, {})
+
+        self.assertRedirects(response, reverse('bo:router_rules'))
+        # 모두 그대로.
+        from chat.models import RouterRule
+        self.assertEqual(RouterRule.objects.count(), 3)
+
+    def test_bulk_action_ignores_non_integer_ids(self):
+        from chat.models import RouterRule
+        url = reverse('bo:router_rules_bulk_delete')
+        response = self.client.post(url, {'ids': ['abc', '', str(self.r1.pk)]})
+
+        self.assertRedirects(response, reverse('bo:router_rules'))
+        # r1 만 삭제, 잘못된 토큰은 무시.
+        self.assertEqual(RouterRule.objects.count(), 2)
+        self.assertFalse(RouterRule.objects.filter(pk=self.r1.pk).exists())

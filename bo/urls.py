@@ -46,6 +46,11 @@ urlpatterns = [
     path('router-rules/<int:pk>/toggle/', views.router_rules_toggle, name='router_rules_toggle'),
     path('router-rules/<int:pk>/delete/', views.router_rules_delete, name='router_rules_delete'),
 
+    # 일괄 액션 (Phase 8-3) — ids[] POST 로 받음
+    path('router-rules/bulk-enable/', views.router_rules_bulk_enable, name='router_rules_bulk_enable'),
+    path('router-rules/bulk-disable/', views.router_rules_bulk_disable, name='router_rules_bulk_disable'),
+    path('router-rules/bulk-delete/', views.router_rules_bulk_delete, name='router_rules_bulk_delete'),
+
     # Agent 운영 제어 (Phase 8-3) — singleton 페이지라 pk 없음.
     path('agent/', views.agent_view, name='agent'),
 ]
