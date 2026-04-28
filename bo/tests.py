@@ -151,3 +151,36 @@ class RouterRulesBulkActionsTests(TestCase):
         # r1 만 삭제, 잘못된 토큰은 무시.
         self.assertEqual(RouterRule.objects.count(), 2)
         self.assertFalse(RouterRule.objects.filter(pk=self.r1.pk).exists())
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class BoSharedPartialsMarkupTests(TestCase):
+    """Phase 8-4 — `bo.js` 가 동작하기 위한 마크업 attribute 회귀 가드."""
+
+    def setUp(self):
+        from chat.models import RouterRule
+        RouterRule.objects.create(
+            name='r1', route='agent', match_type='contains',
+            pattern='비교', priority=100, enabled=True,
+        )
+
+    def test_router_rules_page_emits_bulk_attributes(self):
+        url = reverse('bo:router_rules')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode('utf-8')
+        # bo.js 의 hook 들이 정확히 출력되는지 — 이게 깨지면 일괄 액션 동작 안 함.
+        self.assertIn('data-bulk-page="router"', body)
+        self.assertIn('data-bulk-edit-toggle', body)
+        self.assertIn('data-bulk-target="router"', body)
+        self.assertIn('data-bulk-toolbar', body)
+        self.assertIn('data-bulk-action', body)
+        self.assertIn('data-bulk-row', body)
+        self.assertIn('data-bulk-check', body)
+
+    def test_base_template_loads_bo_js(self):
+        url = reverse('bo:router_rules')
+        response = self.client.get(url)
+        body = response.content.decode('utf-8')
+        # base.html 이 모든 페이지에 bo.js 로드.
+        self.assertIn("/static/bo/bo.js", body)
