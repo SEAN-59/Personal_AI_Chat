@@ -78,6 +78,18 @@ class AgentNodeTests(SimpleTestCase):
     def _patch_token_recorder(self):
         return patch('chat.graph.nodes.agent.record_token_usage')
 
+    def setUp(self):
+        # Phase 8-3: agent_node 가 DB 의 AgentSettings 를 조회하므로 SimpleTestCase
+        # 에선 패치로 _DEFAULTS (enabled=True) 강제. 본 테스트는 enabled 동작 격리
+        # 검증 대상이 아니라 rewriter / run_agent 호출 시그니처가 본 관심사.
+        from chat.services.agent.runtime_settings import _DEFAULTS
+        self._settings_patch = patch(
+            'chat.graph.nodes.agent._rs.load_runtime_settings',
+            return_value=_DEFAULTS,
+        )
+        self._settings_patch.start()
+        self.addCleanup(self._settings_patch.stop)
+
     # ---------- history 분기 ----------
 
     def test_empty_history_skips_rewriter(self):

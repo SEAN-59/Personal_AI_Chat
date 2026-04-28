@@ -1,4 +1,6 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import CheckConstraint, Q
 
 from pgvector.django import HnswIndex, VectorField
 
@@ -218,3 +220,76 @@ class RouterRule(models.Model):
     def __str__(self):
         flag = '' if self.enabled else ' [off]'
         return f'[{self.route}] {self.name} · "{self.pattern}"{flag}'
+
+
+class AgentSettingsManager(models.Manager):
+    """AgentSettings 의 hard singleton 접근 manager.
+
+    `get_solo()` 가 pk=1 row 를 반환 — 없으면 default 로 생성. 어떤 환경에서도
+    "settings 가 비어있다" 상태가 노출되지 않게 한다 (Phase 8-3 의 incident
+    대응 가치 — runtime 이 항상 설정값을 갖고 있어야 함).
+    """
+
+    def get_solo(self) -> 'AgentSettings':
+        obj, _ = self.get_or_create(pk=1)
+        return obj
+
+
+class AgentSettings(models.Model):
+    """Agent runtime 의 BO 제어 설정 (Phase 8-3, hard singleton).
+
+    pk=1 강제: `save()` override 가 `self.pk = 1` 로 덮어쓰므로 어떤 호출 경로
+    (admin / shell / `objects.create(pk=N, ...)`) 도 결국 pk=1 으로 정렬되거나
+    PK 충돌 IntegrityError 로 실패. extra row 는 절대 생성되지 않는다.
+
+    `Meta.constraints` 의 두 `CheckConstraint` 가 DB-level guard — raw SQL /
+    `.save()` 직접 호출도 범위 위반 시 IntegrityError. Form validators 는
+    사용자-facing 한국어 에러 메시지 담당. runtime sanity check 는 마이그레이션
+    누락 / 외부 데이터 dump 같은 극단 상황의 마지막 안전망.
+    """
+
+    enabled = models.BooleanField(
+        default=True,
+        help_text='체크를 풀면 agent 경로 진입 시 single_shot 으로 폴백합니다 (incident 대응용 kill switch).',
+    )
+    max_iterations = models.PositiveSmallIntegerField(
+        default=6,
+        validators=[MinValueValidator(1), MaxValueValidator(12)],
+        help_text='ReAct loop 의 최대 iteration 수 (1~12). 작을수록 응답 빠르고 비용 절감, 클수록 복잡한 비교 질문 처리 가능.',
+    )
+    max_low_relevance_retrieves = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+        help_text='retrieve_documents 의 low_relevance 누적 한도 (1~10). 도달하면 NOT_FOUND 로 종료해 무관 자료 무한 재검색 차단.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = AgentSettingsManager()
+
+    class Meta:
+        constraints = [
+            CheckConstraint(
+                check=Q(max_iterations__gte=1) & Q(max_iterations__lte=12),
+                name='agentsettings_max_iterations_range',
+            ),
+            CheckConstraint(
+                check=(
+                    Q(max_low_relevance_retrieves__gte=1)
+                    & Q(max_low_relevance_retrieves__lte=10)
+                ),
+                name='agentsettings_max_low_relevance_range',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Hard singleton — 어떤 호출 경로도 결국 pk=1 으로 정렬.
+        # objects.create(pk=N, ...) 는 force_insert=True 로 진입 → pk=1 INSERT
+        # 시도 → 기존 row 있으면 IntegrityError. 첫 호출이면 pk=1 INSERT 성공.
+        # obj = AgentSettings(pk=99); obj.save() 는 force_insert=False 라 pk=1
+        # 으로 UPDATE 또는 INSERT 자동 분기.
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        on = 'ON' if self.enabled else 'OFF'
+        return f'AgentSettings({on}, max_iter={self.max_iterations}, max_low_rel={self.max_low_relevance_retrieves})'

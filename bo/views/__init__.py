@@ -21,4 +21,8 @@ from .router_rules import (
     router_rules_edit,
     router_rules_toggle,
     router_rules_delete,
+    router_rules_bulk_enable,
+    router_rules_bulk_disable,
+    router_rules_bulk_delete,
 )
+from .agent import agent_view

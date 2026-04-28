@@ -1,0 +1,295 @@
+{% extends 'bo/base.html' %}
+
+{% block title %}Agent 운영{% endblock %}
+
+{% block extra_head %}
+<style>
+  .field-enabled {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .field-enabled .form-label { margin: 0; }
+  .field-enabled input[type='checkbox'] { width: auto; }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+  .stat-card {
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-subtle);
+  }
+  .stat-card .stat-label {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-1);
+  }
+  .stat-card .stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+  }
+
+  .tool-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: var(--space-2);
+  }
+  .tool-table th,
+  .tool-table td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .tool-table th {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    font-weight: 500;
+  }
+  .badge-mode {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    background: var(--color-bg-subtle);
+    border: 1px solid var(--color-border);
+  }
+
+  .meta-line {
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    margin-top: var(--space-2);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">Agent 운영</h1>
+    <p class="page-description">
+      Agent 경로의 동작 한도와 활성화 여부를 즉시 조정합니다. 변경은 다음 요청부터 반영됩니다.
+    </p>
+  </div>
+</header>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}" data-auto-dismiss>
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<section class="card">
+  <h2 class="section-title">설정</h2>
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% for field in form %}
+      {% if field.name == 'enabled' %}
+        <div class="form-group field-enabled">
+          {{ field }}
+          <label class="form-label" for="{{ field.id_for_label }}">Agent 경로 활성화</label>
+        </div>
+        {% if field.help_text %}<p class="form-hint">{{ field.help_text|linebreaksbr }}</p>{% endif %}
+      {% else %}
+        <div class="form-group">
+          <label class="form-label" for="{{ field.id_for_label }}">
+            {% if field.name == 'max_iterations' %}최대 iteration 수
+            {% elif field.name == 'max_low_relevance_retrieves' %}low_relevance 누적 한도
+            {% else %}{{ field.label }}{% endif %}
+            <span style="color: var(--color-danger); margin-left: 2px;">*</span>
+          </label>
+          {{ field }}
+          <p class="form-error" data-client-error style="display:none;"></p>
+          {% if field.errors %}{% for e in field.errors %}<p class="form-error" data-server-error>{{ e }}</p>{% endfor %}{% endif %}
+          {% if field.help_text %}<p class="form-hint">{{ field.help_text|linebreaksbr }}</p>{% endif %}
+        </div>
+      {% endif %}
+    {% endfor %}
+
+    <p class="meta-line">마지막 변경: {{ settings.updated_at|date:"Y-m-d H:i" }}</p>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">저장</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" style="margin-top: var(--space-4);">
+  <h2 class="section-title">최근 {{ recent_usage.days }}일 호출 통계</h2>
+  <p class="page-description">
+    Phase 8-2 의 TokenUsage purpose 분류로 분리 집계. <code>query_rewriter</code> 는 single_shot / workflow / agent 세 경로 통합값입니다.
+  </p>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">agent_step (도구 / 추론)</div>
+      <div class="stat-value">{{ recent_usage.agent_step }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">agent_final (최종 답변)</div>
+      <div class="stat-value">{{ recent_usage.agent_final }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">query_rewriter (전 경로)</div>
+      <div class="stat-value">{{ recent_usage.query_rewriter }}</div>
+    </div>
+  </div>
+</section>
+
+<section class="card" style="margin-top: var(--space-4);">
+  <h2 class="section-title">Tool 카탈로그 (읽기 전용)</h2>
+  <p class="page-description">
+    Agent 가 ReAct loop 에서 호출 가능한 도구. 본 PR 범위에선 읽기 전용 — 도구별 활성/비활성 제어는 후속 Phase.
+  </p>
+
+  <table class="tool-table">
+    <thead>
+      <tr>
+        <th>이름</th>
+        <th>설명</th>
+        <th>입력 모드</th>
+        <th>failure_check</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tool in tool_catalog %}
+        <tr>
+          <td><code>{{ tool.name }}</code></td>
+          <td>{{ tool.description }}</td>
+          <td><span class="badge-mode">{{ tool.mode }}</span></td>
+          <td>{% if tool.has_failure_check %}있음{% else %}—{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" style="text-align: center; color: var(--color-text-muted);">등록된 도구가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // (1) router_rule_form.html 의 shake 패턴 — client-side 검증 + 흔들림 + scroll
+  //     + server-side 에러 (`data-server-error`) 가 있으면 페이지 로드 시점에 같은 효과 자동 적용.
+  (function () {
+    const form = document.querySelector('.card form');
+    if (!form) return;
+
+    const numericInputs = Array.from(form.querySelectorAll('input.input[type="number"]'));
+
+    function getClientErrorEl(input) {
+      const group = input.closest('.form-group');
+      return group ? group.querySelector('.form-error[data-client-error]') : null;
+    }
+
+    function getLabelText(input) {
+      const label = form.querySelector(`label[for="${input.id}"]`);
+      if (!label) return '';
+      return label.childNodes[0] ? label.childNodes[0].textContent.trim() : label.textContent.trim();
+    }
+
+    function showFieldError(input, message) {
+      input.classList.add('is-error');
+      input.classList.remove('shake');
+      requestAnimationFrame(() => input.classList.add('shake'));
+      input.addEventListener('animationend', () => input.classList.remove('shake'), { once: true });
+
+      const msgEl = getClientErrorEl(input);
+      if (msgEl && message) {
+        msgEl.textContent = message;
+        msgEl.style.display = 'block';
+      }
+    }
+
+    function clearFieldError(input) {
+      input.classList.remove('is-error');
+      const msgEl = getClientErrorEl(input);
+      if (msgEl) {
+        msgEl.textContent = '';
+        msgEl.style.display = 'none';
+      }
+    }
+
+    // 사용자가 값을 바꾸면 클라이언트 에러 + 서버 에러 모두 시각 효과 해제.
+    numericInputs.forEach((input) => {
+      const clear = () => {
+        clearFieldError(input);
+        const group = input.closest('.form-group');
+        const serverErr = group ? group.querySelector('.form-error[data-server-error]') : null;
+        if (serverErr) serverErr.remove();
+      };
+      input.addEventListener('input', clear);
+      input.addEventListener('change', clear);
+    });
+
+    // 페이지 로드 시 server-side 에러가 표시된 필드는 자동으로 .is-error + shake.
+    form.querySelectorAll('.form-error[data-server-error]').forEach((errEl) => {
+      const group = errEl.closest('.form-group');
+      const input = group ? group.querySelector('input.input') : null;
+      if (input) {
+        showFieldError(input, '');
+      }
+    });
+
+    // submit 시 client-side 검증 — 빈 값 / 범위 위반 (HTML5 min/max) 의 첫 invalid 에 shake.
+    form.addEventListener('submit', (e) => {
+      let firstInvalid = null;
+      numericInputs.forEach((input) => {
+        const v = (input.value || '').trim();
+        const min = Number(input.getAttribute('min'));
+        const max = Number(input.getAttribute('max'));
+        const num = Number(v);
+        let msg = '';
+        if (!v) {
+          msg = `${getLabelText(input)}을(를) 입력해주세요.`;
+        } else if (Number.isFinite(min) && num < min) {
+          msg = `${min} 이상이어야 합니다.`;
+        } else if (Number.isFinite(max) && num > max) {
+          msg = `${max} 이하여야 합니다.`;
+        }
+        if (msg) {
+          showFieldError(input, msg);
+          if (!firstInvalid) firstInvalid = input;
+        }
+      });
+      if (firstInvalid) {
+        e.preventDefault();
+        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        firstInvalid.focus({ preventScroll: true });
+      }
+    });
+  })();
+
+  // (2) 토스트 자동 사라짐 — `data-auto-dismiss` 가 붙은 alert 만. 3초 후 fade-out.
+  (function () {
+    const alerts = document.querySelectorAll('.alert[data-auto-dismiss]');
+    alerts.forEach((el) => {
+      // 에러 메시지는 사용자가 읽고 조치해야 하므로 alert-danger 는 자동 사라짐 제외.
+      if (el.classList.contains('alert-danger')) return;
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.4s ease';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 400);
+      }, 3000);
+    });
+  })();
+</script>
+{% endblock %}

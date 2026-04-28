@@ -55,6 +55,14 @@
             </svg>
             라우팅 관리
           </a>
+          <a href="{% url 'bo:agent' %}" class="sidebar-nav-item {% if current == 'agent' %}active{% endif %}">
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 1v6m0 10v6m11-11h-6m-10 0H1"></path>
+              <path d="M20.39 7.61l-4.24 4.24M7.85 12.15l-4.24 4.24M20.39 16.39l-4.24-4.24M7.85 7.85l-4.24 4.24"></path>
+            </svg>
+            Agent 운영
+          </a>
         {% endwith %}
       </nav>
     </aside>

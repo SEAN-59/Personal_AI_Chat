@@ -23,6 +23,7 @@ import json
 import logging
 from typing import Any, Mapping, Optional
 
+from chat.services.agent import runtime_settings as _rs
 from chat.services.agent import tools as agent_tools
 from chat.services.agent.prompts import build_messages
 from chat.services.agent.result import (
@@ -46,7 +47,11 @@ logger = logging.getLogger(__name__)
 # 까지 못 가서 MAX_ITERATIONS_EXCEEDED 가 떨어졌음. 6 으로 상향해 retrieve 두 번 +
 # 보조 검색 한 번 + final 까지 여유롭게 도달 가능하게 한다. 한 턴 LLM 호출은 최악
 # rewriter 1 + agent step 7 = 8 회.
-DEFAULT_MAX_ITERATIONS = 6
+#
+# Phase 8-3: default 의 single source of truth 는 runtime_settings.py 로 이동.
+# 본 module-level 상수는 외부 import 호환을 위한 alias (단방향 — react 가 runtime_settings
+# 를 import 하지만 그 반대는 아님).
+DEFAULT_MAX_ITERATIONS = _rs.DEFAULT_MAX_ITERATIONS
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_REPEATED_CALL = 3
 
@@ -54,21 +59,35 @@ MAX_REPEATED_CALL = 3
 # 가 아니라 누적 — tier-OR false positive 가 끼어 consecutive 가 리셋돼도 영향 없음.
 # `_decide_termination` 의 max_iter 보다 먼저 평가 → "retrieve 가 의미 없는 결과
 # 3+ 회" 시 UPSTREAM_ERROR 미도달 알고리즘적 보장.
-MAX_LOW_RELEVANCE_RETRIEVES = 3
+#
+# Phase 8-3: runtime_settings.DEFAULT_MAX_LOW_RELEVANCE_RETRIEVES 의 alias —
+# 이름이 다른 이유는 7-4 부터 외부 노출된 호환 이름 (test_agent_react.py 등) 보존.
+MAX_LOW_RELEVANCE_RETRIEVES = _rs.DEFAULT_MAX_LOW_RELEVANCE_RETRIEVES
 
 
 def run_agent(
     question: str,
     history: list,
     *,
-    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    max_iterations: int = None,
 ) -> AgentResult:
-    """ReAct loop 를 한 턴 돌려 `AgentResult` 반환 (Phase 8-1).
+    """ReAct loop 를 한 턴 돌려 `AgentResult` 반환 (Phase 8-1; Phase 8-3 settings 주입).
 
     Phase 7 까지는 `WorkflowResult` 반환이었음. 8-1 부터는 agent 가 자신의 의미
     (sources / tool_calls / termination) 를 1급 필드로 표현하도록 `AgentResult`.
     `WorkflowResult` 가 필요한 외부 호출자는 `result.to_workflow_result()` 어댑터.
+
+    Phase 8-3: `max_iterations` / `max_low_relevance_retrieves` 의 우선순위:
+        1. `max_iterations=N` 명시 호출 → 그 값 (테스트·외부 명시 제어).
+        2. 그 외 → `runtime_settings.load_runtime_settings()` 로 BO 설정 적용.
+        3. settings 조회 실패 / sanity 실패 → `_DEFAULTS` (코드 상수와 동일).
     """
+    settings = _rs.load_runtime_settings()
+    effective_max_iter = (
+        max_iterations if max_iterations is not None else settings.max_iterations
+    )
+    effective_max_low_rel = settings.max_low_relevance_retrieves
+
     state = AgentState(question=(question or '').strip(), history=list(history or []))
 
     if not state.question:
@@ -81,7 +100,7 @@ def run_agent(
     # JSON 파싱 retry 한 번 허용 — 같은 iteration 안에서.
     parse_retry_budget = 1
 
-    while state.iteration_count < max_iterations:
+    while state.iteration_count < effective_max_iter:
         try:
             messages = build_messages(state)
         except Exception as exc:                                      # noqa: BLE001
@@ -203,7 +222,9 @@ def run_agent(
             state.iteration_count += 1
 
         # 종료 조건 체크 (next iteration 들어가기 전에).
-        termination = _decide_termination(state, max_iterations)
+        termination = _decide_termination(
+            state, effective_max_iter, effective_max_low_rel,
+        )
         if termination is not None:
             return to_agent_result(termination, state=state)
 
@@ -242,6 +263,7 @@ def _parse_action(raw: str) -> Optional[dict[str, Any]]:
 def _decide_termination(
     state: AgentState,
     max_iterations: int,
+    max_low_relevance: int,
 ) -> Optional[AgentTermination]:
     """다음 iteration 으로 갈지, 종료할지 판정.
 
@@ -251,9 +273,12 @@ def _decide_termination(
     2) `iter >= max_iter` 안전판.
     3) consecutive_failures.
     4) repeated_call_count (Part 1 차단으로 사실상 도달 불가, 하위 호환성).
+
+    Phase 8-3: `max_iterations` / `max_low_relevance` 인자 받아 BO 설정 반영.
+    상수 재사용 안 하고 호출자가 결정한 한도만 본다.
     """
     # Phase 7-4: low_relevance 누적 가드 — max_iter 보다 먼저 평가.
-    if state.low_relevance_retrieve_count() >= MAX_LOW_RELEVANCE_RETRIEVES:
+    if state.low_relevance_retrieve_count() >= max_low_relevance:
         return AgentTermination.NO_MORE_USEFUL_TOOLS
 
     if state.iteration_count >= max_iterations:
