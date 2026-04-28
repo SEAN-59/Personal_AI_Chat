@@ -86,7 +86,7 @@
 
 {% if messages %}
   {% for message in messages %}
-    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}">
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}" data-auto-dismiss>
       {{ message }}
     </div>
   {% endfor %}
@@ -114,9 +114,11 @@
             {% if field.name == 'max_iterations' %}최대 iteration 수
             {% elif field.name == 'max_low_relevance_retrieves' %}low_relevance 누적 한도
             {% else %}{{ field.label }}{% endif %}
+            <span style="color: var(--color-danger); margin-left: 2px;">*</span>
           </label>
           {{ field }}
-          {% if field.errors %}{% for e in field.errors %}<p class="form-error">{{ e }}</p>{% endfor %}{% endif %}
+          <p class="form-error" data-client-error style="display:none;"></p>
+          {% if field.errors %}{% for e in field.errors %}<p class="form-error" data-server-error>{{ e }}</p>{% endfor %}{% endif %}
           {% if field.help_text %}<p class="form-hint">{{ field.help_text|linebreaksbr }}</p>{% endif %}
         </div>
       {% endif %}
@@ -181,4 +183,113 @@
     </tbody>
   </table>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // (1) router_rule_form.html 의 shake 패턴 — client-side 검증 + 흔들림 + scroll
+  //     + server-side 에러 (`data-server-error`) 가 있으면 페이지 로드 시점에 같은 효과 자동 적용.
+  (function () {
+    const form = document.querySelector('.card form');
+    if (!form) return;
+
+    const numericInputs = Array.from(form.querySelectorAll('input.input[type="number"]'));
+
+    function getClientErrorEl(input) {
+      const group = input.closest('.form-group');
+      return group ? group.querySelector('.form-error[data-client-error]') : null;
+    }
+
+    function getLabelText(input) {
+      const label = form.querySelector(`label[for="${input.id}"]`);
+      if (!label) return '';
+      return label.childNodes[0] ? label.childNodes[0].textContent.trim() : label.textContent.trim();
+    }
+
+    function showFieldError(input, message) {
+      input.classList.add('is-error');
+      input.classList.remove('shake');
+      requestAnimationFrame(() => input.classList.add('shake'));
+      input.addEventListener('animationend', () => input.classList.remove('shake'), { once: true });
+
+      const msgEl = getClientErrorEl(input);
+      if (msgEl && message) {
+        msgEl.textContent = message;
+        msgEl.style.display = 'block';
+      }
+    }
+
+    function clearFieldError(input) {
+      input.classList.remove('is-error');
+      const msgEl = getClientErrorEl(input);
+      if (msgEl) {
+        msgEl.textContent = '';
+        msgEl.style.display = 'none';
+      }
+    }
+
+    // 사용자가 값을 바꾸면 클라이언트 에러 + 서버 에러 모두 시각 효과 해제.
+    numericInputs.forEach((input) => {
+      const clear = () => {
+        clearFieldError(input);
+        const group = input.closest('.form-group');
+        const serverErr = group ? group.querySelector('.form-error[data-server-error]') : null;
+        if (serverErr) serverErr.remove();
+      };
+      input.addEventListener('input', clear);
+      input.addEventListener('change', clear);
+    });
+
+    // 페이지 로드 시 server-side 에러가 표시된 필드는 자동으로 .is-error + shake.
+    form.querySelectorAll('.form-error[data-server-error]').forEach((errEl) => {
+      const group = errEl.closest('.form-group');
+      const input = group ? group.querySelector('input.input') : null;
+      if (input) {
+        showFieldError(input, '');
+      }
+    });
+
+    // submit 시 client-side 검증 — 빈 값 / 범위 위반 (HTML5 min/max) 의 첫 invalid 에 shake.
+    form.addEventListener('submit', (e) => {
+      let firstInvalid = null;
+      numericInputs.forEach((input) => {
+        const v = (input.value || '').trim();
+        const min = Number(input.getAttribute('min'));
+        const max = Number(input.getAttribute('max'));
+        const num = Number(v);
+        let msg = '';
+        if (!v) {
+          msg = `${getLabelText(input)}을(를) 입력해주세요.`;
+        } else if (Number.isFinite(min) && num < min) {
+          msg = `${min} 이상이어야 합니다.`;
+        } else if (Number.isFinite(max) && num > max) {
+          msg = `${max} 이하여야 합니다.`;
+        }
+        if (msg) {
+          showFieldError(input, msg);
+          if (!firstInvalid) firstInvalid = input;
+        }
+      });
+      if (firstInvalid) {
+        e.preventDefault();
+        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        firstInvalid.focus({ preventScroll: true });
+      }
+    });
+  })();
+
+  // (2) 토스트 자동 사라짐 — `data-auto-dismiss` 가 붙은 alert 만. 3초 후 fade-out.
+  (function () {
+    const alerts = document.querySelectorAll('.alert[data-auto-dismiss]');
+    alerts.forEach((el) => {
+      // 에러 메시지는 사용자가 읽고 조치해야 하므로 alert-danger 는 자동 사라짐 제외.
+      if (el.classList.contains('alert-danger')) return;
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.4s ease';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 400);
+      }, 3000);
+    });
+  })();
+</script>
 {% endblock %}
