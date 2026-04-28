@@ -12,18 +12,18 @@
     <h1 class="page-title">Q&amp;A 관리</h1>
     <p class="page-description">모든 채팅 로그입니다. 좋은 답변은 [공식 승격]으로 검색용 공식 Q&amp;A에 추가됩니다.</p>
   </div>
-  <button type="button" class="btn qa-edit-toggle" data-qa-edit-toggle>수정</button>
+  <button type="button" class="btn" data-bulk-edit-toggle data-bulk-target="qa-logs">수정</button>
 </header>
 
 {% include 'bo/_qa_subnav.html' %}
 
 {% if messages %}
   {% for message in messages %}
-    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}">{{ message }}</div>
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}" data-auto-dismiss>{{ message }}</div>
   {% endfor %}
 {% endif %}
 
-<div class="qa-page">
+<div class="qa-page" data-bulk-page="qa-logs">
   <nav class="qa-tabs">
     <a class="qa-tab {% if tab == 'all' %}active{% endif %}" href="?tab=all{% if q %}&q={{ q }}{% endif %}">
       전체 <span class="qa-tab-count">{{ tab_counts.all }}</span>
@@ -61,25 +61,25 @@
 
   <form id="qa-bulk-form" method="post">{% csrf_token %}</form>
 
-  <div class="qa-bulk-toolbar" data-qa-bulk-toolbar>
-    <button type="button" class="btn btn-sm" data-qa-select-all>전체 선택</button>
+  <div data-bulk-toolbar>
+    <button type="button" class="btn btn-sm" data-bulk-select-all>전체 선택</button>
     <button type="submit" class="btn btn-sm btn-primary" form="qa-bulk-form"
             formaction="{% url 'bo:qa_bulk_promote' %}"
-            data-qa-bulk-promote
+            data-bulk-action
             disabled>선택 승격</button>
     <button type="submit" class="btn btn-sm btn-danger" form="qa-bulk-form"
             formaction="{% url 'bo:qa_bulk_delete_logs' %}"
-            data-qa-bulk-delete
-            data-qa-confirm="선택한 대화 로그를 모두 삭제하시겠습니까?"
+            data-bulk-action
+            data-bulk-confirm="선택한 대화 로그를 모두 삭제하시겠습니까?"
             disabled>선택 삭제</button>
-    <span class="qa-bulk-count"><span data-qa-selected-count>0</span>개 선택됨</span>
+    <span><span data-bulk-count>0</span>개 선택됨</span>
   </div>
 
   {% if page_obj.paginator.count %}
     {% for cl in items %}
-      <article class="qa-card" data-qa-id="{{ cl.pk }}">
+      <article class="qa-card" data-bulk-row data-bulk-id="{{ cl.pk }}">
         <input type="checkbox" name="ids" value="{{ cl.pk }}" form="qa-bulk-form"
-               class="qa-bulk-check" hidden>
+               data-bulk-check hidden>
         <h2 class="qa-question">Q. {{ cl.question }}</h2>
         <div class="qa-meta">
           {% if cl.promoted_count > 0 %}
@@ -155,5 +155,5 @@
 {% endblock %}
 
 {% block scripts %}
-{% include 'bo/_qa_bulk_script.html' %}
+{# Phase 8-4: bo.js 가 일괄 액션 처리 — _qa_bulk_script.html include 제거 #}
 {% endblock %}

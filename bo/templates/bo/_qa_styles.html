@@ -159,9 +159,9 @@
     padding: 0;
   }
 
-  /* ── 일괄 선택 모드 ─────────────────────────────────────────── */
+  /* ── 일괄 선택 모드 (Phase 8-4: data-bulk-* 일반화) ─────────── */
   /* 툴바와 선택 스타일은 기본적으로 숨겨져 있다가 .bulk-mode 가 켜지면 드러난다. */
-  .qa-bulk-toolbar {
+  [data-bulk-page] [data-bulk-toolbar] {
     display: none;
     align-items: center;
     gap: var(--space-3);
@@ -171,22 +171,22 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
   }
-  .qa-bulk-toolbar .qa-bulk-count {
+  [data-bulk-page] [data-bulk-toolbar] [data-bulk-count] {
     margin-left: auto;
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
   }
-  .qa-page.bulk-mode .qa-bulk-toolbar { display: flex; }
+  [data-bulk-page].bulk-mode [data-bulk-toolbar] { display: flex; }
 
-  /* 편집 모드에서 카드 자체가 클릭 타깃처럼 보이게 */
-  .qa-page.bulk-mode .qa-card {
+  /* 편집 모드에서 row(카드) 자체가 클릭 타깃처럼 보이게 */
+  [data-bulk-page].bulk-mode [data-bulk-row].qa-card {
     cursor: pointer;
     transition: border-color var(--transition-base), box-shadow var(--transition-base), background var(--transition-base);
   }
-  .qa-page.bulk-mode .qa-card:hover {
+  [data-bulk-page].bulk-mode [data-bulk-row].qa-card:hover {
     border-color: var(--color-accent-border);
   }
-  .qa-page.bulk-mode .qa-card.selected {
+  [data-bulk-page].bulk-mode [data-bulk-row].qa-card.selected {
     border: 2px solid var(--color-accent);
     background: var(--color-accent-light);
     /* 2px 테두리 증가분을 패딩으로 보정해 내부 레이아웃 흔들림 방지 */
@@ -194,13 +194,13 @@
   }
 
   /* 편집 모드에서 단건 액션·편집 폼은 숨긴다. bulk 액션 사용을 유도. */
-  .qa-page.bulk-mode .qa-actions,
-  .qa-page.bulk-mode .qa-answer-editor-form {
+  [data-bulk-page].bulk-mode .qa-actions,
+  [data-bulk-page].bulk-mode .qa-answer-editor-form {
     display: none !important;
   }
 
   /* 편집 모드 토글 버튼이 활성 상태일 때 식별되도록 */
-  .qa-edit-toggle.active {
+  [data-bulk-edit-toggle].active {
     background: var(--color-accent-light);
     border-color: var(--color-accent);
     color: var(--color-accent-text);

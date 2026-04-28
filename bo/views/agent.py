@@ -22,14 +22,22 @@ from chat.services.token_purpose import (
 
 
 class AgentSettingsForm(forms.ModelForm):
-    """`AgentSettings` 편집 폼. validators 가 자동으로 min/max 범위 강제."""
+    """`AgentSettings` 편집 폼. validators 가 자동으로 min/max 범위 강제.
+
+    Phase 8-4: 숫자 input 에 `data-shake-input` 추가 — 공용 bo.js 의 initFormShake
+    가 hook 으로 사용. HTML5 `required` 미적용 input 이라 명시 opt-in 경로.
+    """
 
     class Meta:
         model = AgentSettings
         fields = ('enabled', 'max_iterations', 'max_low_relevance_retrieves')
         widgets = {
-            'max_iterations': forms.NumberInput(attrs={'class': 'input', 'min': 1, 'max': 12}),
-            'max_low_relevance_retrieves': forms.NumberInput(attrs={'class': 'input', 'min': 1, 'max': 10}),
+            'max_iterations': forms.NumberInput(attrs={
+                'class': 'input', 'min': 1, 'max': 12, 'data-shake-input': '1',
+            }),
+            'max_low_relevance_retrieves': forms.NumberInput(attrs={
+                'class': 'input', 'min': 1, 'max': 10, 'data-shake-input': '1',
+            }),
             # enabled 는 체크박스 — .input 적용 시 스타일 깨짐.
         }
 
