@@ -1,4 +1,4 @@
-# 2026-04-28 개발 로그 — 2.0.0 Phase 8-4: Polish — Retrieval Relevance & BO Shared Partials
+# 2026-04-28 개발 로그 — 0.4.0 Phase 8-4: Polish — Retrieval Relevance & BO Shared Partials
 
 ## 배경
 
