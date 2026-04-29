@@ -13,6 +13,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from chat.models import TokenUsage
+from chat.services.openai_pricing import compute_cost_usd
 from chat.services.qa_retriever import save_chat_log
 from chat.services.token_purpose import PURPOSE_UNKNOWN, validate_purpose
 from files.services.retriever import ChunkHit
@@ -67,6 +68,9 @@ def record_token_usage(
     Phase 8-2: keyword-only `purpose` 추가. 기존 `record_token_usage(model, usage)`
     호출 호환 (default 'unknown'). `validate_purpose` 가 알 수 없는 값을
     'unknown' 으로 절감 — 호출부 오타가 데이터 오염으로 직결되지 않게.
+
+    Phase 8-5: `compute_cost_usd` 호출해 cost row 에 자동 저장. 시그니처 변경 없음
+    — 모든 호출 사이트 무영향. 미등록 모델은 0 + warning (fail-silent).
     """
     TokenUsage.objects.create(
         model=model,
@@ -74,6 +78,9 @@ def record_token_usage(
         completion_tokens=usage.completion_tokens,
         total_tokens=usage.total_tokens,
         purpose=validate_purpose(purpose),
+        cost_usd=compute_cost_usd(
+            model, usage.prompt_tokens, usage.completion_tokens,
+        ),
     )
 
 
