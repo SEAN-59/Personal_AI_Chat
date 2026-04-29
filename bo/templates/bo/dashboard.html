@@ -164,6 +164,31 @@
         </tbody>
       </table>
     </div>
+
+    {% if purpose_page.paginator.num_pages > 1 %}
+      <nav class="pagination">
+        <div class="pagination-row">
+          {% if purpose_page.has_previous %}
+            <a class="pagination-btn" href="?purpose_page={{ purpose_page.previous_page_number }}">‹ 이전</a>
+          {% else %}
+            <span class="pagination-btn disabled">‹ 이전</span>
+          {% endif %}
+          {% for n in purpose_page.paginator.page_range %}
+            {% if n == purpose_page.number %}
+              <span class="pagination-page active">{{ n }}</span>
+            {% else %}
+              <a class="pagination-page" href="?purpose_page={{ n }}">{{ n }}</a>
+            {% endif %}
+          {% endfor %}
+          {% if purpose_page.has_next %}
+            <a class="pagination-btn" href="?purpose_page={{ purpose_page.next_page_number }}">다음 ›</a>
+          {% else %}
+            <span class="pagination-btn disabled">다음 ›</span>
+          {% endif %}
+        </div>
+        <div class="pagination-info">총 {{ purpose_page.paginator.count }}개 purpose</div>
+      </nav>
+    {% endif %}
   {% else %}
     <div class="empty-state">
       <div class="empty-state-title">최근 {{ days }}일 동안 발생한 purpose 가 없습니다</div>

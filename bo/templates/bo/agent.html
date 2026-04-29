@@ -184,6 +184,31 @@
       {% endfor %}
     </tbody>
   </table>
+
+  {% if catalog_page.paginator.num_pages > 1 %}
+    <nav class="pagination">
+      <div class="pagination-row">
+        {% if catalog_page.has_previous %}
+          <a class="pagination-btn" href="?catalog_page={{ catalog_page.previous_page_number }}{% if audit_page.number > 1 %}&audit_page={{ audit_page.number }}{% endif %}">‹ 이전</a>
+        {% else %}
+          <span class="pagination-btn disabled">‹ 이전</span>
+        {% endif %}
+        {% for n in catalog_page.paginator.page_range %}
+          {% if n == catalog_page.number %}
+            <span class="pagination-page active">{{ n }}</span>
+          {% else %}
+            <a class="pagination-page" href="?catalog_page={{ n }}{% if audit_page.number > 1 %}&audit_page={{ audit_page.number }}{% endif %}">{{ n }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if catalog_page.has_next %}
+          <a class="pagination-btn" href="?catalog_page={{ catalog_page.next_page_number }}{% if audit_page.number > 1 %}&audit_page={{ audit_page.number }}{% endif %}">다음 ›</a>
+        {% else %}
+          <span class="pagination-btn disabled">다음 ›</span>
+        {% endif %}
+      </div>
+      <div class="pagination-info">총 {{ catalog_page.paginator.count }}개 도구</div>
+    </nav>
+  {% endif %}
 </section>
 
 <section class="card" style="margin-top: var(--space-4);">
@@ -221,6 +246,31 @@
       {% endfor %}
     </tbody>
   </table>
+
+  {% if audit_page.paginator.num_pages > 1 %}
+    <nav class="pagination">
+      <div class="pagination-row">
+        {% if audit_page.has_previous %}
+          <a class="pagination-btn" href="?audit_page={{ audit_page.previous_page_number }}{% if catalog_page.number > 1 %}&catalog_page={{ catalog_page.number }}{% endif %}">‹ 이전</a>
+        {% else %}
+          <span class="pagination-btn disabled">‹ 이전</span>
+        {% endif %}
+        {% for n in audit_page.paginator.page_range %}
+          {% if n == audit_page.number %}
+            <span class="pagination-page active">{{ n }}</span>
+          {% else %}
+            <a class="pagination-page" href="?audit_page={{ n }}{% if catalog_page.number > 1 %}&catalog_page={{ catalog_page.number }}{% endif %}">{{ n }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if audit_page.has_next %}
+          <a class="pagination-btn" href="?audit_page={{ audit_page.next_page_number }}{% if catalog_page.number > 1 %}&catalog_page={{ catalog_page.number }}{% endif %}">다음 ›</a>
+        {% else %}
+          <span class="pagination-btn disabled">다음 ›</span>
+        {% endif %}
+      </div>
+      <div class="pagination-info">총 {{ audit_page.paginator.count }}건</div>
+    </nav>
+  {% endif %}
 </section>
 {% endblock %}
 

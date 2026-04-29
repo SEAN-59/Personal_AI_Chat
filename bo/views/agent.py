@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from django import forms
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import redirect, render
@@ -31,8 +32,8 @@ AUDIT_FIELDS = (
     'max_repeated_call',
 )
 
-# 페이지 하단 audit 섹션 노출 row 수.
-RECENT_AUDIT_LIMIT = 10
+# BO 보조 섹션 페이지 크기 — 메인 기능이 아닌 사이드 표는 5건 단위 통일.
+SECONDARY_PAGE_SIZE = 5
 
 
 class AgentSettingsForm(forms.ModelForm):
@@ -153,14 +154,24 @@ def agent_view(request):
     else:
         form = AgentSettingsForm(instance=settings_obj)
 
+    # Phase 8-6: 보조 섹션 (audit / tool catalog) 5건 단위 페이지네이션.
+    # 한 페이지에 두 표가 있어 query key 분리: audit_page / catalog_page.
+    audit_paginator = Paginator(
+        AgentSettingsAudit.objects.all(), SECONDARY_PAGE_SIZE,
+    )
+    audit_page = audit_paginator.get_page(request.GET.get('audit_page'))
+
+    catalog_paginator = Paginator(_tool_catalog(), SECONDARY_PAGE_SIZE)
+    catalog_page = catalog_paginator.get_page(request.GET.get('catalog_page'))
+
     context = {
         'section': 'agent',
         'form': form,
         'settings': settings_obj,
-        'tool_catalog': _tool_catalog(),
+        'tool_catalog': catalog_page,
+        'catalog_page': catalog_page,
         'recent_usage': _recent_usage_summary(),
-        'recent_audits': list(
-            AgentSettingsAudit.objects.all()[:RECENT_AUDIT_LIMIT]
-        ),
+        'recent_audits': audit_page,
+        'audit_page': audit_page,
     }
     return render(request, 'bo/agent.html', context)
