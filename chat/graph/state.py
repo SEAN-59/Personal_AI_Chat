@@ -1,0 +1,42 @@
+"""LangGraph state 스키마.
+
+Phase 2 는 single-shot 한 경로만 의미있게 사용한다. 이후 Phase 4 에서 router 가
+실제 분기를 시작하고, Phase 5~7 에서 workflow / agent 가 붙을 때도 같은 state
+구조 위에 필드를 '추가' 만 한다는 원칙이다. 지금 존재하지 않는 필드를 미리
+선언해 두지는 않는다 — 코드와 문서 양쪽에서 오해를 만들 수 있어서.
+
+TypedDict 를 쓰는 이유:
+    - 추가 의존성 0 (Pydantic 도입 회피)
+    - LangGraph 가 공식 지원하는 가장 가벼운 state 방식
+    - dataclass(QueryResult) 를 Optional 필드로 그대로 담을 수 있음
+      (현재 checkpointer 를 쓰지 않으므로 직렬화 요구 없음)
+
+total=False 로 둬서 호출자가 초기 상태를 구성할 때 result / error 같은
+출력 필드를 생략할 수 있게 한다.
+"""
+
+from typing import Optional, TypedDict
+
+from chat.services.single_shot.types import QueryResult
+
+
+class GraphState(TypedDict, total=False):
+    # ─── 입력 ──────────────────────────────────────────
+    question: str            # 사용자 질문 원문
+    history: list[dict]      # 세션 히스토리 [{'role':..., 'content':...}, ...]
+
+    # ─── router 결과 ──────────────────────────────────
+    # Phase 4-1 기준: 'single_shot' / 'workflow' / 'agent' (chat.graph.routes 참조).
+    # Phase 6-1 부터 workflow 경로에는 workflow_key 가 함께 실려 내려가고,
+    # workflow_node 가 이 값을 registry 에 조회해 실제 domain workflow 를 고른다.
+    # key 가 비었거나 등록된 값이 아니면 workflow_node 는 single_shot 으로 폴백.
+    route: str
+    route_reason: str            # 'workflow_keyword' / 'agent_keyword' / 'default' / 'db_rule:<name>'
+    matched_rules: list[str]     # 매치된 키워드(있을 경우)
+    workflow_key: str            # Phase 6-1: 선택된 generic workflow key (비어있을 수 있음)
+
+    # ─── 실행 결과 ────────────────────────────────────
+    result: Optional[QueryResult]
+
+    # ─── 에러 전달 (노드 내부에서 포착한 메시지) ──────
+    error: Optional[str]

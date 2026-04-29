@@ -16,6 +16,10 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# 프롬프트 파일 루트. 기본은 repo 내부 assets/prompts/, 운영에서는 PROMPTS_DIR
+# 환경변수로 외부 마운트 경로를 줘서 재배포 없이 교체 가능.
+PROMPTS_DIR = Path(os.environ.get('PROMPTS_DIR', BASE_DIR / 'assets' / 'prompts'))
+
 
 # 환경변수 헬퍼
 def _env_bool(name: str, default: bool) -> bool:
@@ -144,6 +148,34 @@ TIME_ZONE = 'Asia/Seoul'
 USE_I18N = True
 
 USE_TZ = True
+
+
+# ─── 로깅 ──────────────────────────────────────────────
+# Django 기본 LOGGING 은 django.* 로거만 콘솔로 보낸다. 우리 앱(chat / bo / files)의
+# INFO 레벨 메시지는 root 로 올라가 drop 되므로 명시적으로 콘솔 handler 를 붙인다.
+# Phase 4-1 router_node 의 fallback INFO 처럼 운영 관측에 필요한 로그가 실제 콘솔/
+# docker compose logs 에 노출되어야 한다.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '{levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'loggers': {
+        'chat':  {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'bo':    {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'files': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+}
 
 
 # Static files (CSS, JavaScript, Images)

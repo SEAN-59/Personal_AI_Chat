@@ -7,6 +7,9 @@ app_name = 'bo'
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
 
+    # 대시보드 모달이 fetch 하는 OpenAI 사용량 JSON 엔드포인트 (Phase 4-4)
+    path('api/openai-usage/', views.openai_usage, name='openai_usage'),
+
     # 파일관리
     path('files/', views.files, name='files'),
     path('files/upload/', views.upload, name='upload'),
@@ -25,4 +28,29 @@ urlpatterns = [
     path('qa/logs/<int:pk>/delete/', views.qa_log_delete, name='qa_log_delete'),
     path('qa/canonical/<int:pk>/update/', views.qa_canonical_update, name='qa_canonical_update'),
     path('qa/canonical/<int:pk>/delete/', views.qa_canonical_delete, name='qa_canonical_delete'),
+
+    # 일괄 액션 (bulk) — ids[] POST 로 받음
+    path('qa/logs/bulk-promote/', views.qa_bulk_promote, name='qa_bulk_promote'),
+    path('qa/logs/bulk-delete/', views.qa_bulk_delete_logs, name='qa_bulk_delete_logs'),
+    path('qa/canonical/bulk-delete/', views.qa_bulk_delete_canonical, name='qa_bulk_delete_canonical'),
+
+    # Prompt 관리 (registry 기반 allow-list 편집기)
+    path('prompts/', views.prompts_index, name='prompts'),
+    path('prompts/<slug:key>/', views.prompts_edit, name='prompts_edit'),
+    path('prompts/<slug:key>/update/', views.prompts_update, name='prompts_update'),
+
+    # 라우팅 관리 (Phase 4-2 RouterRule CRUD)
+    path('router-rules/', views.router_rules_index, name='router_rules'),
+    path('router-rules/new/', views.router_rules_new, name='router_rules_new'),
+    path('router-rules/<int:pk>/edit/', views.router_rules_edit, name='router_rules_edit'),
+    path('router-rules/<int:pk>/toggle/', views.router_rules_toggle, name='router_rules_toggle'),
+    path('router-rules/<int:pk>/delete/', views.router_rules_delete, name='router_rules_delete'),
+
+    # 일괄 액션 (Phase 8-3) — ids[] POST 로 받음
+    path('router-rules/bulk-enable/', views.router_rules_bulk_enable, name='router_rules_bulk_enable'),
+    path('router-rules/bulk-disable/', views.router_rules_bulk_disable, name='router_rules_bulk_disable'),
+    path('router-rules/bulk-delete/', views.router_rules_bulk_delete, name='router_rules_bulk_delete'),
+
+    # Agent 운영 제어 (Phase 8-3) — singleton 페이지라 pk 없음.
+    path('agent/', views.agent_view, name='agent'),
 ]

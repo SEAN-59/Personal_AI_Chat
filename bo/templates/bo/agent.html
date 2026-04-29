@@ -1,0 +1,276 @@
+{% extends 'bo/base.html' %}
+
+{% block title %}Agent 운영{% endblock %}
+
+{% block extra_head %}
+<style>
+  .field-enabled {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .field-enabled .form-label { margin: 0; }
+  .field-enabled input[type='checkbox'] { width: auto; }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+  .stat-card {
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-subtle);
+  }
+  .stat-card .stat-label {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-1);
+  }
+  .stat-card .stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+  }
+
+  .tool-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: var(--space-2);
+  }
+  .tool-table th,
+  .tool-table td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .tool-table th {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    font-weight: 500;
+  }
+  .badge-mode {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    background: var(--color-bg-subtle);
+    border: 1px solid var(--color-border);
+  }
+
+  .meta-line {
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    margin-top: var(--space-2);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">Agent 운영</h1>
+    <p class="page-description">
+      Agent 경로의 동작 한도와 활성화 여부를 즉시 조정합니다. 변경은 다음 요청부터 반영됩니다.
+    </p>
+  </div>
+</header>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}" data-auto-dismiss>
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<section class="card">
+  <h2 class="section-title">설정</h2>
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% for field in form %}
+      {% if field.name == 'enabled' %}
+        <div class="form-group field-enabled">
+          {{ field }}
+          <label class="form-label" for="{{ field.id_for_label }}">Agent 경로 활성화</label>
+        </div>
+        {% if field.help_text %}<p class="form-hint">{{ field.help_text|linebreaksbr }}</p>{% endif %}
+      {% else %}
+        <div class="form-group">
+          <label class="form-label" for="{{ field.id_for_label }}">
+            {% if field.name == 'max_iterations' %}최대 iteration 수
+            {% elif field.name == 'max_low_relevance_retrieves' %}low_relevance 누적 한도
+            {% elif field.name == 'max_consecutive_failures' %}연속 실패 한도
+            {% elif field.name == 'max_repeated_call' %}동일 호출 반복 한도
+            {% else %}{{ field.label }}{% endif %}
+            <span style="color: var(--color-danger); margin-left: 2px;">*</span>
+          </label>
+          {{ field }}
+          <p class="form-error" data-client-error style="display:none;"></p>
+          {% if field.errors %}{% for e in field.errors %}<p class="form-error" data-server-error>{{ e }}</p>{% endfor %}{% endif %}
+          {% if field.help_text %}<p class="form-hint">{{ field.help_text|linebreaksbr }}</p>{% endif %}
+        </div>
+      {% endif %}
+    {% endfor %}
+
+    <p class="meta-line">마지막 변경: {{ settings.updated_at|date:"Y-m-d H:i" }}</p>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">저장</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" style="margin-top: var(--space-4);">
+  <h2 class="section-title">최근 {{ recent_usage.days }}일 호출 통계</h2>
+  <p class="page-description">
+    Phase 8-2 의 TokenUsage purpose 분류로 분리 집계. <code>query_rewriter</code> 는 single_shot / workflow / agent 세 경로 통합값입니다.
+  </p>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">agent_step (도구 / 추론)</div>
+      <div class="stat-value">{{ recent_usage.agent_step }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">agent_final (최종 답변)</div>
+      <div class="stat-value">{{ recent_usage.agent_final }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">query_rewriter (전 경로)</div>
+      <div class="stat-value">{{ recent_usage.query_rewriter }}</div>
+    </div>
+  </div>
+</section>
+
+<section class="card" style="margin-top: var(--space-4);">
+  <h2 class="section-title">Tool 카탈로그 (읽기 전용)</h2>
+  <p class="page-description">
+    Agent 가 ReAct loop 에서 호출 가능한 도구. 본 PR 범위에선 읽기 전용 — 도구별 활성/비활성 제어는 후속 Phase.
+  </p>
+
+  <table class="tool-table">
+    <thead>
+      <tr>
+        <th>이름</th>
+        <th>설명</th>
+        <th>입력 모드</th>
+        <th>failure_check</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tool in tool_catalog %}
+        <tr>
+          <td><code>{{ tool.name }}</code></td>
+          <td>{{ tool.description }}</td>
+          <td><span class="badge-mode">{{ tool.mode }}</span></td>
+          <td>{% if tool.has_failure_check %}있음{% else %}—{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" style="text-align: center; color: var(--color-text-muted);">등록된 도구가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if catalog_page.paginator.num_pages > 1 %}
+    <nav class="pagination">
+      <div class="pagination-row">
+        {% if catalog_page.has_previous %}
+          <a class="pagination-btn" href="?catalog_page={{ catalog_page.previous_page_number }}{% if audit_page.number > 1 %}&audit_page={{ audit_page.number }}{% endif %}">‹ 이전</a>
+        {% else %}
+          <span class="pagination-btn disabled">‹ 이전</span>
+        {% endif %}
+        {% for n in catalog_page.paginator.page_range %}
+          {% if n == catalog_page.number %}
+            <span class="pagination-page active">{{ n }}</span>
+          {% else %}
+            <a class="pagination-page" href="?catalog_page={{ n }}{% if audit_page.number > 1 %}&audit_page={{ audit_page.number }}{% endif %}">{{ n }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if catalog_page.has_next %}
+          <a class="pagination-btn" href="?catalog_page={{ catalog_page.next_page_number }}{% if audit_page.number > 1 %}&audit_page={{ audit_page.number }}{% endif %}">다음 ›</a>
+        {% else %}
+          <span class="pagination-btn disabled">다음 ›</span>
+        {% endif %}
+      </div>
+      <div class="pagination-info">총 {{ catalog_page.paginator.count }}개 도구</div>
+    </nav>
+  {% endif %}
+</section>
+
+<section class="card" style="margin-top: var(--space-4);">
+  <h2 class="section-title">Settings 변경 이력</h2>
+  <p class="page-description">
+    BO 에서 발생한 설정 변경 최근 10건. 변경된 필드만 기록되며, 운영자 계정 삭제 시에도 audit 자체는 보존됩니다.
+  </p>
+
+  <table class="tool-table">
+    <thead>
+      <tr>
+        <th style="width: 160px;">시각</th>
+        <th style="width: 140px;">변경자</th>
+        <th>변경 필드</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for audit in recent_audits %}
+        <tr>
+          <td>{{ audit.changed_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{% if audit.changed_by %}{{ audit.changed_by.username }}{% else %}<span style="color: var(--color-text-muted);">(익명)</span>{% endif %}</td>
+          <td>
+            {% for field, change in audit.changes.items %}
+              <div style="font-size: var(--font-size-xs);">
+                <code>{{ field }}</code>:
+                <span style="color: var(--color-text-muted);">{{ change.old }}</span>
+                →
+                <strong>{{ change.new }}</strong>
+              </div>
+            {% endfor %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">최근 변경 내역 없음</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if audit_page.paginator.num_pages > 1 %}
+    <nav class="pagination">
+      <div class="pagination-row">
+        {% if audit_page.has_previous %}
+          <a class="pagination-btn" href="?audit_page={{ audit_page.previous_page_number }}{% if catalog_page.number > 1 %}&catalog_page={{ catalog_page.number }}{% endif %}">‹ 이전</a>
+        {% else %}
+          <span class="pagination-btn disabled">‹ 이전</span>
+        {% endif %}
+        {% for n in audit_page.paginator.page_range %}
+          {% if n == audit_page.number %}
+            <span class="pagination-page active">{{ n }}</span>
+          {% else %}
+            <a class="pagination-page" href="?audit_page={{ n }}{% if catalog_page.number > 1 %}&catalog_page={{ catalog_page.number }}{% endif %}">{{ n }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if audit_page.has_next %}
+          <a class="pagination-btn" href="?audit_page={{ audit_page.next_page_number }}{% if catalog_page.number > 1 %}&catalog_page={{ catalog_page.number }}{% endif %}">다음 ›</a>
+        {% else %}
+          <span class="pagination-btn disabled">다음 ›</span>
+        {% endif %}
+      </div>
+      <div class="pagination-info">총 {{ audit_page.paginator.count }}건</div>
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}
+

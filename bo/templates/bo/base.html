@@ -39,6 +39,30 @@
             </svg>
             Q&amp;A 관리
           </a>
+          <a href="{% url 'bo:prompts' %}" class="sidebar-nav-item {% if current == 'prompts' or current == 'prompts_edit' %}active{% endif %}">
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+            Prompt 관리
+          </a>
+          <a href="{% url 'bo:router_rules' %}" class="sidebar-nav-item {% if current == 'router_rules' or current == 'router_rules_new' or current == 'router_rules_edit' %}active{% endif %}">
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="6" r="3"></circle>
+              <circle cx="18" cy="18" r="3"></circle>
+              <circle cx="18" cy="6" r="3"></circle>
+              <path d="M6 9v3a3 3 0 0 0 3 3h6"></path>
+            </svg>
+            라우팅 관리
+          </a>
+          <a href="{% url 'bo:agent' %}" class="sidebar-nav-item {% if current == 'agent' %}active{% endif %}">
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 1v6m0 10v6m11-11h-6m-10 0H1"></path>
+              <path d="M20.39 7.61l-4.24 4.24M7.85 12.15l-4.24 4.24M20.39 16.39l-4.24-4.24M7.85 7.85l-4.24 4.24"></path>
+            </svg>
+            Agent 운영
+          </a>
         {% endwith %}
       </nav>
     </aside>
@@ -48,6 +72,8 @@
     </main>
   </div>
 
+  <!-- Phase 8-4: BO 공용 JS — initFormShake / initAlertAutoDismiss / initBulkActions -->
+  <script src="{% static 'bo/bo.js' %}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
