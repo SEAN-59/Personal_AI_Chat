@@ -4,17 +4,7 @@
 
 버전은 [SemVer](https://semver.org/lang/ko/) 정책. release 는 `release on demand` (사용자 명시 요청 시 develop → main + tag).
 
-## [Unreleased] — 2026-04-29 시점 develop
-
-### Phase 9 — 안정화 및 배포 준비 (in progress)
-
-- **자동 회귀 가드** 신규 — 라우팅 e2e (`test_routing_e2e.py`) + 파이프라인 smoke (`test_pipeline_smoke.py`) + prompt registry 정합 (`PromptRegistryConsistencyTests`).
-- 12 대표 질문셋 + 회귀 체크리스트 + 배포 체크리스트 dev log 정리.
-- Phase 1~8 의 모든 dev log 인용한 본 CHANGELOG 신규.
-
----
-
-## [0.4.0] — 미배포
+## [0.4.0] — 2026-04-29
 
 > 0.3.x → 0.4.0 의 핵심 변화는 "단일 single-shot RAG → LangGraph 기반 3분류 (single_shot / workflow / agent) 운영 가능 구조" 로의 전환.
 
@@ -49,6 +39,12 @@
 
 - **후속 질문 잡음** — `비싼거` 같이 맥락 의존 질문이 무관 PDF 와 매치되던 문제. Phase 4-3 query rewriter 로 해소.
 - **인사말 잡음** — `안녕하세요` 같은 짧은 답변에 출처 / 피드백 / ChatLog 가 잘못 표시되던 문제. `classify_reply` 의 `_CASUAL_MARKERS` 분류로 해소.
+
+### Stabilization (Phase 9)
+
+- **자동 회귀 가드** 신규 — 라우팅 e2e (`test_routing_e2e.py`) + 파이프라인 smoke (`test_pipeline_smoke.py`) + prompt registry 정합 (`PromptRegistryConsistencyTests`). 총 19 cases 추가, 523/523 그린.
+- 12 대표 질문셋 (single_shot 3 / workflow 3 / agent 3 / edge 3) + 회귀 체크리스트 + 배포 체크리스트 dev log 정리.
+- 본 CHANGELOG 신규 (Phase 1~9 모든 dev log 인용).
 
 ### Migration / Deployment
 
