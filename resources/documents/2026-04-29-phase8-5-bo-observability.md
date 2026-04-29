@@ -1,4 +1,4 @@
-# 2026-04-29 개발 로그 — 2.0.0 Phase 8-5: BO Observability — Purpose Breakdown & Cost
+# 2026-04-29 개발 로그 — 0.4.0 Phase 8-5: BO Observability — Purpose Breakdown & Cost
 
 ## 배경
 

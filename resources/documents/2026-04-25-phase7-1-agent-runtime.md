@@ -1,4 +1,4 @@
-# 2026-04-25 개발 로그 — 2.0.0 Phase 7-1: Agent Runtime (foundation)
+# 2026-04-25 개발 로그 — 0.4.0 Phase 7-1: Agent Runtime (foundation)
 
 ## 배경
 

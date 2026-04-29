@@ -1,4 +1,4 @@
-# 2026-04-23 개발 로그 — 2.0.0 Phase 4-1: 질문 라우팅 Core
+# 2026-04-23 개발 로그 — 0.4.0 Phase 4-1: 질문 라우팅 Core
 
 ## 배경
 Phase 2~3 에서 graph 진입점과 single_shot 내부 구조는 정리됐지만, `chat/graph/nodes/router.py` 는 여전히 `{'route': 'single_shot'}` 만 반환하는 placeholder 였다. 모든 요청이 single-shot 으로만 흘러 Phase 5~7 (workflow / agent) 이 붙을 길이 없다.
@@ -178,10 +178,10 @@ router_node 의 fallback INFO 로그가 실제로 찍히지 않는 문제가 최
 ### 신규 (4)
 - `chat/graph/routes.py`
 - `chat/services/question_router.py`
-- `resources/plans/detail/2.0.0_Phase 4-1_질문_라우팅_Core_개발_플랜.md`
+- `resources/plans/detail/0.4.0_Phase 4-1_질문_라우팅_Core_개발_플랜.md`
 - `resources/documents/2026-04-23-phase4-1-router.md` (본 문서)
 
-Step 0 에서 `resources/plans/2.0.0_Phase 4_질문_라우팅_개발_설계.md` 도 디스크에만 있던 걸 체크인.
+Step 0 에서 `resources/plans/0.4.0_Phase 4_질문_라우팅_개발_설계.md` 도 디스크에만 있던 걸 체크인.
 
 ### 수정 (3)
 - `chat/graph/state.py` — `route_reason`, `matched_rules` 필드

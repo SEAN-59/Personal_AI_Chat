@@ -1,10 +1,10 @@
-# 2026-04-24 개발 로그 — 2.0.0 Phase 6-1: Workflow Dispatch 인프라
+# 2026-04-24 개발 로그 — 0.4.0 Phase 6-1: Workflow Dispatch 인프라
 
 ## 배경
 
 Phase 5 에서 `chat/workflows/core/` 를 6 모듈로 완성해 뒀지만, 실제 사용처가 없는 라이브러리 상태였다. Phase 4 라우팅은 질문을 `single_shot / workflow / agent` 로 분류했지만 `workflow` 와 `agent` 는 여전히 single_shot 으로 포워딩됐다.
 
-Phase 6 설계(`resources/plans/2.0.0_Phase 6_범용_Workflow_Domain_개발_설계.md`)는 회사 전용 계산(퇴직금·연차)이 아닌 **질문 유형(`date_calculation`, `amount_calculation`, `table_lookup`, …)** 중심의 generic workflow 를 올리는 것을 목표로 한다. 분량이 커서 **6-1 / 6-2 / 6-3** 세 단계로 쪼갠다:
+Phase 6 설계(`resources/plans/0.4.0_Phase 6_범용_Workflow_Domain_개발_설계.md`)는 회사 전용 계산(퇴직금·연차)이 아닌 **질문 유형(`date_calculation`, `amount_calculation`, `table_lookup`, …)** 중심의 generic workflow 를 올리는 것을 목표로 한다. 분량이 커서 **6-1 / 6-2 / 6-3** 세 단계로 쪼갠다:
 
 - **6-1 (이번)** — dispatch 인프라 + 첫 generic workflow(`date_calculation`).
 - **6-2** — `amount_calculation` + 자연어에서 workflow_input 추출.

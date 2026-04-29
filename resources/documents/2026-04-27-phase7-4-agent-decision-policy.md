@@ -1,4 +1,4 @@
-# 2026-04-27 개발 로그 — 2.0.0 Phase 7-4: Agent Decision Policy & Retrieval Relevance (Phase 7 완료)
+# 2026-04-27 개발 로그 — 0.4.0 Phase 7-4: Agent Decision Policy & Retrieval Relevance (Phase 7 완료)
 
 ## 배경
 
@@ -289,7 +289,7 @@ docker compose exec -T web python manage.py check
 
 ---
 
-## 10. Phase 7 (2.0.0 Agent) 진짜 종료
+## 10. Phase 7 (0.4.0 Agent) 진짜 종료
 
 - **7-1** (#43, 머지): runtime + tools + 단위 테스트. graph 미연결.
 - **7-2** (#45, 머지): graph wiring + reply 포맷터 + BO smoke + 7-1 튜닝.

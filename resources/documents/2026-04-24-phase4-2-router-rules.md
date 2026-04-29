@@ -1,4 +1,4 @@
-# 2026-04-24 개발 로그 — 2.0.0 Phase 4-2: BO Router Rule 관리
+# 2026-04-24 개발 로그 — 0.4.0 Phase 4-2: BO Router Rule 관리
 
 ## 배경
 Phase 4-1 에서 `question_router` 가 코드 상수 기반으로 3분류(`single_shot / workflow / agent`)를 살렸지만, 키워드가 파이썬 튜플에 박혀 있어 새 질문 패턴이 등장할 때마다 재배포가 필요했다.

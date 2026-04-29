@@ -1,4 +1,4 @@
-# 2026-04-24 개발 로그 — 2.0.0 Phase 6-2: Workflow Input Extraction + amount_calculation
+# 2026-04-24 개발 로그 — 0.4.0 Phase 6-2: Workflow Input Extraction + amount_calculation
 
 ## 배경
 

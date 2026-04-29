@@ -14,9 +14,9 @@
 
 ---
 
-## [2.0.0] — 미배포
+## [0.4.0] — 미배포
 
-> 1.x → 2.0.0 의 핵심 변화는 "단일 single-shot RAG → LangGraph 기반 3분류 (single_shot / workflow / agent) 운영 가능 구조" 로의 전환.
+> 0.3.x → 0.4.0 의 핵심 변화는 "단일 single-shot RAG → LangGraph 기반 3분류 (single_shot / workflow / agent) 운영 가능 구조" 로의 전환.
 
 ### Added (사용자 가시 변화)
 
@@ -45,7 +45,7 @@
 - **AgentSettings 모델** — Phase 8-3 도입 + 8-6 의 `max_consecutive_failures` / `max_repeated_call` 두 필드 추가. 마이그레이션 `0012` / `0014`.
 - **AgentSettingsAudit 모델** — Phase 8-6 신규. 마이그레이션 `0015`.
 
-### Fixed (1.x 회귀)
+### Fixed (0.3.x 회귀)
 
 - **후속 질문 잡음** — `비싼거` 같이 맥락 의존 질문이 무관 PDF 와 매치되던 문제. Phase 4-3 query rewriter 로 해소.
 - **인사말 잡음** — `안녕하세요` 같은 짧은 답변에 출처 / 피드백 / ChatLog 가 잘못 표시되던 문제. `classify_reply` 의 `_CASUAL_MARKERS` 분류로 해소.
@@ -56,15 +56,15 @@
 - 환경변수 추가: `OPENAI_ADMIN_KEY` (선택, Phase 4-4 의 widget 용).
 - pgvector 확장 필요 (Phase 0 시점부터).
 
-### Out of scope (2.0.0 release 이후)
+### Out of scope (0.4.0 release 이후)
 
 - Phase 8-7 후보 — embedder / reranker `record_token_usage` 통합 → BO cost 가 외부 청구에 더 근접.
 - 장기 backlog — audit dedicated page / BO observability v2 / agent step timeline / `MAX_REPEATED_CALL` 정책 통합 / 한국어 형태소 분석기 / 외부 SaaS observability.
 
 ---
 
-## [1.x] — 이전 버전
+## [0.3.x] — 이전 버전
 
-1.x 시리즈는 단일 single-shot RAG 챗봇. 변경 이력은 git history 참조.
+0.3.x 시리즈는 단일 single-shot RAG 챗봇. 변경 이력은 git history 참조.
 
 - 대표 일자별 dev log: `resources/documents/2026-04-22-deploy.md` 등.

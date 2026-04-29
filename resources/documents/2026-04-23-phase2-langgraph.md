@@ -1,7 +1,7 @@
-# 2026-04-23 개발 로그 — 2.0.0 Phase 2: LangGraph 적용
+# 2026-04-23 개발 로그 — 0.4.0 Phase 2: LangGraph 적용
 
 ## 배경
-2.0.0 로드맵의 두 번째 단계. Phase 1 에서 프롬프트는 파일·로더로 분리됐지만, 질문 처리 진입점은 여전히 `chat/views/message.py` 가 `chat/services/query_pipeline.answer_question()` 을 직접 호출하는 구조. 이 상태로 Phase 4 (라우터) · Phase 5~6 (workflow) · Phase 7 (agent) 를 얹으면 view 와 service 에 분기 로직이 쌓여 구조가 빠르게 망가진다.
+0.4.0 로드맵의 두 번째 단계. Phase 1 에서 프롬프트는 파일·로더로 분리됐지만, 질문 처리 진입점은 여전히 `chat/views/message.py` 가 `chat/services/query_pipeline.answer_question()` 을 직접 호출하는 구조. 이 상태로 Phase 4 (라우터) · Phase 5~6 (workflow) · Phase 7 (agent) 를 얹으면 view 와 service 에 분기 로직이 쌓여 구조가 빠르게 망가진다.
 
 Phase 2 의 목표는 **기존 동작과 JSON 응답 포맷을 한 줄도 바꾸지 않고, 실행 진입점을 LangGraph 런타임 위로 옮기는 것**. `answer_question()` 본체는 재사용만 하고, 그 주변에 `state / node / app` 골격을 세운다.
 

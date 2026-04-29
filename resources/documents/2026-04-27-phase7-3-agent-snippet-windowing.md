@@ -1,4 +1,4 @@
-# 2026-04-27 개발 로그 — 2.0.0 Phase 7-3: Agent Retrieval Snippet Windowing (Phase 7 완료)
+# 2026-04-27 개발 로그 — 0.4.0 Phase 7-3: Agent Retrieval Snippet Windowing (Phase 7 완료)
 
 ## 배경
 
@@ -172,7 +172,7 @@ docker compose exec -T web python manage.py check
 
 ---
 
-## 6. Phase 7 (2.0.0 Agent) 진짜 종료
+## 6. Phase 7 (0.4.0 Agent) 진짜 종료
 
 7-1 / 7-2 / 7-3 누적 산출물:
 
@@ -180,7 +180,7 @@ docker compose exec -T web python manage.py check
 - **7-2**: `chat/graph/nodes/agent.py` + `chat/services/agent/reply.py` + `app.py` 결선 + graph 결선 자동 회귀 테스트 첫 사례 + 7-1 튜닝 (max_iterations 6, observation cap 1500, retrieve top 3×400자, 프롬프트 결정성 강화, iteration INFO 로그).
 - **7-3 (이 PR)**: query-focused snippet windowing — `_tokenize_query` + `_focus_window` + `_retrieve_callable` dict wrapping.
 
-설계 문서 (`resources/plans/2.0.0_Phase 7_Agent_개발_설계.md`) 의 4 가지 핵심 목표 모두 충족 + 7-2 smoke 가 노출한 retrieval observation 의 fixed-position truncation 한계까지 근본 해결. **Phase 7 마일스톤 닫기**.
+설계 문서 (`resources/plans/0.4.0_Phase 7_Agent_개발_설계.md`) 의 4 가지 핵심 목표 모두 충족 + 7-2 smoke 가 노출한 retrieval observation 의 fixed-position truncation 한계까지 근본 해결. **Phase 7 마일스톤 닫기**.
 
 ---
 

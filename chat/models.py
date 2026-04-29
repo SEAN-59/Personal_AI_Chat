@@ -128,7 +128,7 @@ class TokenUsage(models.Model):
 
 
 class RouterRule(models.Model):
-    """2.0.0 Phase 4-2 — 운영자가 BO에서 관리하는 라우팅 rule.
+    """0.4.0 Phase 4-2 — 운영자가 BO에서 관리하는 라우팅 rule.
 
     question_router.route_question 은 이 모델을 먼저 조회하고, 매치가 없을 때만
     코드 상수(WORKFLOW_KEYWORDS / AGENT_KEYWORDS)로 fallback 한다. DB 가

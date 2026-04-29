@@ -1,4 +1,4 @@
-# 2026-04-28 개발 로그 — 2.0.0 Phase 8-2: TokenUsage Purpose / Agent Observability 기초
+# 2026-04-28 개발 로그 — 0.4.0 Phase 8-2: TokenUsage Purpose / Agent Observability 기초
 
 ## 배경
 

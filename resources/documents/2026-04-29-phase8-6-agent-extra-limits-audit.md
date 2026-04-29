@@ -1,4 +1,4 @@
-# 2026-04-29 개발 로그 — 2.0.0 Phase 8-6: Agent Settings Expansion: Extra Limits & Audit Log
+# 2026-04-29 개발 로그 — 0.4.0 Phase 8-6: Agent Settings Expansion: Extra Limits & Audit Log
 
 ## 배경
 

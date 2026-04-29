@@ -1,4 +1,4 @@
-# 2026-04-23 개발 로그 — 2.0.0 Phase 3: 기존 코드 개편
+# 2026-04-23 개발 로그 — 0.4.0 Phase 3: 기존 코드 개편
 
 ## 배경
 Phase 2 에서 실행 진입점은 LangGraph 위로 올렸지만, single-shot 의 실제 로직은 여전히 `chat/services/query_pipeline.answer_question()` 하나가 다 가지고 있었다. 검색·재정렬·QA 캐시·프롬프트 조립·OpenAI 호출·TokenUsage 저장·ChatLog 저장·분류·sources 구성까지 한 함수 안에 뒤섞인 상태라, Phase 4 (router) 이후에 workflow / agent 가 붙으면 같은 흐름이 곳곳에서 반복될 수밖에 없었다.
@@ -151,8 +151,8 @@ Step 10 docs: Document Phase 3 refactor and common rules
 - `chat/services/single_shot/pipeline.py`
 - `chat/workflows/__init__.py` / `core/__init__.py` / `domains/__init__.py`
 - `resources/documents/2026-04-23-phase3-refactor.md` (본 문서)
-- `resources/plans/detail/2.0.0_Phase 3_기존_코드_개편_개발_플랜.md`
-- `resources/plans/2.0.0_Phase 3_기존_코드_개편_개발_설계.md` (디스크에만 있던 걸 체크인)
+- `resources/plans/detail/0.4.0_Phase 3_기존_코드_개편_개발_플랜.md`
+- `resources/plans/0.4.0_Phase 3_기존_코드_개편_개발_설계.md` (디스크에만 있던 걸 체크인)
 
 ### 수정 (5)
 - `chat/graph/state.py` · `chat/graph/app.py` · `chat/graph/nodes/single_shot.py` — types 경로 및 `run_single_shot` 직접 호출

@@ -1,4 +1,4 @@
-# 2026-04-27 개발 로그 — 2.0.0 Phase 7-2: Agent Graph Wiring (Phase 7 완료)
+# 2026-04-27 개발 로그 — 0.4.0 Phase 7-2: Agent Graph Wiring (Phase 7 완료)
 
 ## 배경
 
