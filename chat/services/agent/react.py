@@ -52,8 +52,9 @@ logger = logging.getLogger(__name__)
 # 본 module-level 상수는 외부 import 호환을 위한 alias (단방향 — react 가 runtime_settings
 # 를 import 하지만 그 반대는 아님).
 DEFAULT_MAX_ITERATIONS = _rs.DEFAULT_MAX_ITERATIONS
-MAX_CONSECUTIVE_FAILURES = 3
-MAX_REPEATED_CALL = 3
+# Phase 8-6: 두 상수도 runtime_settings 의 DEFAULT_* alias 로. 외부 import 호환 유지.
+MAX_CONSECUTIVE_FAILURES = _rs.DEFAULT_MAX_CONSECUTIVE_FAILURES
+MAX_REPEATED_CALL = _rs.DEFAULT_MAX_REPEATED_CALL
 
 # Phase 7-4: retrieve_documents 의 'low_relevance' failure 누적 한도. consecutive
 # 가 아니라 누적 — tier-OR false positive 가 끼어 consecutive 가 리셋돼도 영향 없음.
@@ -87,6 +88,9 @@ def run_agent(
         max_iterations if max_iterations is not None else settings.max_iterations
     )
     effective_max_low_rel = settings.max_low_relevance_retrieves
+    # Phase 8-6: 두 한도도 settings 에서 inject.
+    effective_max_consecutive_failures = settings.max_consecutive_failures
+    effective_max_repeated_call = settings.max_repeated_call
 
     state = AgentState(question=(question or '').strip(), history=list(history or []))
 
@@ -223,7 +227,11 @@ def run_agent(
 
         # 종료 조건 체크 (next iteration 들어가기 전에).
         termination = _decide_termination(
-            state, effective_max_iter, effective_max_low_rel,
+            state,
+            effective_max_iter,
+            effective_max_low_rel,
+            effective_max_consecutive_failures,
+            effective_max_repeated_call,
         )
         if termination is not None:
             return to_agent_result(termination, state=state)
@@ -264,6 +272,8 @@ def _decide_termination(
     state: AgentState,
     max_iterations: int,
     max_low_relevance: int,
+    max_consecutive_failures: int,
+    max_repeated_call: int,
 ) -> Optional[AgentTermination]:
     """다음 iteration 으로 갈지, 종료할지 판정.
 
@@ -275,6 +285,7 @@ def _decide_termination(
     4) repeated_call_count (Part 1 차단으로 사실상 도달 불가, 하위 호환성).
 
     Phase 8-3: `max_iterations` / `max_low_relevance` 인자 받아 BO 설정 반영.
+    Phase 8-6: `max_consecutive_failures` / `max_repeated_call` 인자도 추가.
     상수 재사용 안 하고 호출자가 결정한 한도만 본다.
     """
     # Phase 7-4: low_relevance 누적 가드 — max_iter 보다 먼저 평가.
@@ -284,12 +295,12 @@ def _decide_termination(
     if state.iteration_count >= max_iterations:
         return AgentTermination.MAX_ITERATIONS_EXCEEDED
 
-    if state.consecutive_failures() >= MAX_CONSECUTIVE_FAILURES:
+    if state.consecutive_failures() >= max_consecutive_failures:
         return AgentTermination.NO_MORE_USEFUL_TOOLS
 
     if state.tool_calls:
         last = state.tool_calls[-1]
-        if state.repeated_call_count(last.name, last.arguments) >= MAX_REPEATED_CALL:
+        if state.repeated_call_count(last.name, last.arguments) >= max_repeated_call:
             return AgentTermination.NO_MORE_USEFUL_TOOLS
 
     return None
