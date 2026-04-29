@@ -308,6 +308,7 @@ pending → processing → reviewing → processing → ready
 | `POSTGRES_DB` | DB 이름 | 로컬 기본 `mydb` |
 | `OPENAI_API_KEY` | OpenAI API 키 | `sk-proj-...` 형식 |
 | `OPENAI_MODEL` | 사용 모델 | 기본 `gpt-4o-mini` |
+| `OPENAI_ADMIN_KEY` | (선택) OpenAI Admin 키 | `sk-admin-...` 형식. BO 대시보드의 `API 사용량` 모달 (외부 청구 조회) 전용. 미설정 시 모달만 503 안내, 채팅 기능엔 영향 없음. 발급: https://platform.openai.com/settings/organization/admin-keys |
 
 **실행 순서**
 1. `docker compose up -d` — web(Django, 8001) + db(PostgreSQL 17, 5432) 컨테이너 기동.
