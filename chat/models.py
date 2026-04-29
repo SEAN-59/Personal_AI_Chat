@@ -265,6 +265,22 @@ class AgentSettings(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(10)],
         help_text='retrieve_documents 의 low_relevance 누적 한도 (1~10). 도달하면 NOT_FOUND 로 종료해 무관 자료 무한 재검색 차단.',
     )
+    # Phase 8-6: 추가 한도 두 개 BO 노출.
+    max_consecutive_failures = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+        help_text='연속 실패 한도 (1~10). 도달 시 NO_MORE_USEFUL_TOOLS 종료.',
+    )
+    max_repeated_call = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(2), MaxValueValidator(10)],
+        help_text=(
+            '동일 (tool, args) 반복 호출 한도 (2~10). '
+            '※ 현재는 8-3 의 즉시 차단 정책으로 동일 호출이 1회만 record 되어 '
+            '본 값은 호환/기록용 — 변경해도 실제 동작 변화 거의 없음. '
+            '정책 통합은 후속 Phase.'
+        ),
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     objects = AgentSettingsManager()
@@ -281,6 +297,21 @@ class AgentSettings(models.Model):
                     & Q(max_low_relevance_retrieves__lte=10)
                 ),
                 name='agentsettings_max_low_relevance_range',
+            ),
+            # Phase 8-6
+            CheckConstraint(
+                check=(
+                    Q(max_consecutive_failures__gte=1)
+                    & Q(max_consecutive_failures__lte=10)
+                ),
+                name='agentsettings_max_consecutive_failures_range',
+            ),
+            CheckConstraint(
+                check=(
+                    Q(max_repeated_call__gte=2)
+                    & Q(max_repeated_call__lte=10)
+                ),
+                name='agentsettings_max_repeated_call_range',
             ),
         ]
 

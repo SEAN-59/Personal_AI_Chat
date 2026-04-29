@@ -18,6 +18,15 @@ class LoadRuntimeSettingsHappyPathTests(TestCase):
             settings.max_low_relevance_retrieves,
             rs.DEFAULT_MAX_LOW_RELEVANCE_RETRIEVES,
         )
+        # Phase 8-6: 새 두 필드도 freeze.
+        self.assertEqual(
+            settings.max_consecutive_failures,
+            rs.DEFAULT_MAX_CONSECUTIVE_FAILURES,
+        )
+        self.assertEqual(
+            settings.max_repeated_call,
+            rs.DEFAULT_MAX_REPEATED_CALL,
+        )
 
     def test_db_value_changes_reflected_immediately(self):
         from chat.models import AgentSettings
@@ -49,6 +58,7 @@ class LoadRuntimeSettingsFallbackTests(SimpleTestCase):
             enabled=True,
             max_iterations=999,                     # 범위 밖.
             max_low_relevance_retrieves=3,
+            max_consecutive_failures=3, max_repeated_call=3,
         )
         with patch(
             'chat.models.AgentSettings.objects.get_solo',
@@ -62,6 +72,21 @@ class LoadRuntimeSettingsFallbackTests(SimpleTestCase):
         from types import SimpleNamespace
         bad_row = SimpleNamespace(
             enabled=True, max_iterations=6, max_low_relevance_retrieves=99,
+            max_consecutive_failures=3, max_repeated_call=3,
+        )
+        with patch(
+            'chat.models.AgentSettings.objects.get_solo',
+            return_value=bad_row,
+        ):
+            settings = rs.load_runtime_settings()
+        self.assertEqual(settings, rs._DEFAULTS)
+
+    def test_sanity_check_demotes_max_repeated_call_one(self):
+        # Phase 8-6: max_repeated_call=1 은 sanity 범위 (2~10) 밖 → _DEFAULTS.
+        from types import SimpleNamespace
+        bad_row = SimpleNamespace(
+            enabled=True, max_iterations=6, max_low_relevance_retrieves=3,
+            max_consecutive_failures=3, max_repeated_call=1,
         )
         with patch(
             'chat.models.AgentSettings.objects.get_solo',
