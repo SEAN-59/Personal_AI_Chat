@@ -326,6 +326,32 @@ class DashboardViewTests(TestCase):
         self.assertNotIn('workflow 입력 추출', body)
 
 
+class PromptRegistryConsistencyTests(TestCase):
+    """Phase 9 — `prompt_registry.all_entries()` 의 모든 entry 의 `relative_path` 가
+    실제 파일로 존재하는지 회귀 가드.
+
+    Phase 1 의 prompt_loader 가 BO 편집 page 에서 entry 를 fetch 할 때 파일이
+    없으면 PromptNotFound + warning 처리는 있지만, registry 와 실제 파일 정합이
+    누적된 phase 동안 깨질 위험. 본 테스트로 release 직전 한 번 가드.
+    """
+
+    def test_all_registered_prompts_exist_on_disk(self):
+        from pathlib import Path
+        from django.conf import settings as django_settings
+        from chat.services.prompt_registry import all_entries
+
+        base = Path(django_settings.PROMPTS_DIR).resolve()
+        missing = []
+        for entry in all_entries():
+            full = base / entry.relative_path
+            if not full.is_file():
+                missing.append(entry.relative_path)
+        self.assertEqual(
+            missing, [],
+            f'Missing prompt files: {missing}',
+        )
+
+
 @override_settings(STORAGES=_NO_MANIFEST_STORAGES)
 class BoSharedPartialsMarkupTests(TestCase):
     """Phase 8-4 — `bo.js` 가 동작하기 위한 마크업 attribute 회귀 가드."""
