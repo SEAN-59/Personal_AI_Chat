@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import CheckConstraint, Q
@@ -265,6 +266,22 @@ class AgentSettings(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(10)],
         help_text='retrieve_documents 의 low_relevance 누적 한도 (1~10). 도달하면 NOT_FOUND 로 종료해 무관 자료 무한 재검색 차단.',
     )
+    # Phase 8-6: 추가 한도 두 개 BO 노출.
+    max_consecutive_failures = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+        help_text='연속 실패 한도 (1~10). 도달 시 NO_MORE_USEFUL_TOOLS 종료.',
+    )
+    max_repeated_call = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(2), MaxValueValidator(10)],
+        help_text=(
+            '동일 (tool, args) 반복 호출 한도 (2~10). '
+            '※ 현재는 8-3 의 즉시 차단 정책으로 동일 호출이 1회만 record 되어 '
+            '본 값은 호환/기록용 — 변경해도 실제 동작 변화 거의 없음. '
+            '정책 통합은 후속 Phase.'
+        ),
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     objects = AgentSettingsManager()
@@ -282,6 +299,21 @@ class AgentSettings(models.Model):
                 ),
                 name='agentsettings_max_low_relevance_range',
             ),
+            # Phase 8-6
+            CheckConstraint(
+                check=(
+                    Q(max_consecutive_failures__gte=1)
+                    & Q(max_consecutive_failures__lte=10)
+                ),
+                name='agentsettings_max_consecutive_failures_range',
+            ),
+            CheckConstraint(
+                check=(
+                    Q(max_repeated_call__gte=2)
+                    & Q(max_repeated_call__lte=10)
+                ),
+                name='agentsettings_max_repeated_call_range',
+            ),
         ]
 
     def save(self, *args, **kwargs):
@@ -296,3 +328,36 @@ class AgentSettings(models.Model):
     def __str__(self):
         on = 'ON' if self.enabled else 'OFF'
         return f'AgentSettings({on}, max_iter={self.max_iterations}, max_low_rel={self.max_low_relevance_retrieves})'
+
+
+class AgentSettingsAudit(models.Model):
+    """`AgentSettings` 변경 이력 (Phase 8-6).
+
+    BO `/bo/agent/` POST 분기에서 form 바인딩 전 DB 값을 별도 캡처 → save 후
+    diff 계산 → 변경된 필드가 있을 때만 본 모델 row 생성. 변경 0 이면 row
+    안 만듦 (empty save 노이즈 차단).
+
+    `changed_by on_delete=SET_NULL` — 운영자 계정 삭제 시 audit row 보존, UI 에서
+    "(삭제된 사용자)" 표시. CASCADE 안 씀 (audit 영구 보존 원칙).
+    """
+
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='+',
+    )
+    # {field: {'old': X, 'new': Y}, ...} — 변경된 필드만 포함.
+    changes = models.JSONField(default=dict)
+    # 변경 후 5 필드 전체 상태 (incident 분석용).
+    snapshot = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ['-changed_at']
+
+    def __str__(self):
+        when = self.changed_at.strftime('%Y-%m-%d %H:%M')
+        who = self.changed_by.username if self.changed_by else '(익명)'
+        fields = ', '.join(self.changes.keys()) if self.changes else '—'
+        return f'[{when}] {who} → {fields}'

@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.core.paginator import Paginator
 from django.db.models import Count, Sum
 from django.db.models.functions import TruncDate
 from django.shortcuts import render
@@ -19,6 +20,9 @@ from chat.services.token_purpose import (
 
 # 대시보드에서 보여줄 과거 일수
 DASHBOARD_DAYS = 7
+
+# Phase 8-6: 보조 섹션 페이지 크기 — 메인 기능이 아닌 사이드 표는 5건 단위 통일.
+SECONDARY_PAGE_SIZE = 5
 
 
 # Phase 8-5: purpose 코드 → 한국어 라벨. 운영자-facing 표시 용도라 view 안 dict.
@@ -72,10 +76,13 @@ def dashboard(request):
         .order_by('-cost')
     )
     # 한국어 라벨 부착.
-    purpose_rows = [
+    purpose_rows_labeled = [
         {**row, 'label': _PURPOSE_LABELS.get(row['purpose'], row['purpose'])}
         for row in purpose_rows_raw
     ]
+    # Phase 8-6: 5건 단위 페이지네이션 (보조 섹션 통일 정책).
+    purpose_paginator = Paginator(purpose_rows_labeled, SECONDARY_PAGE_SIZE)
+    purpose_page = purpose_paginator.get_page(request.GET.get('purpose_page'))
 
     # 전체 기간 합계 (상단 요약 카드용, Phase 8-5: cost 추가)
     totals = TokenUsage.objects.filter(created_at__gte=since_start).aggregate(
@@ -88,7 +95,8 @@ def dashboard(request):
 
     context = {
         'rows': list(daily_rows),
-        'purpose_rows': purpose_rows,
+        'purpose_rows': purpose_page,
+        'purpose_page': purpose_page,
         'totals': totals,
         'days': DASHBOARD_DAYS,
     }

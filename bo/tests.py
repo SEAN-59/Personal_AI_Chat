@@ -36,13 +36,21 @@ class AgentSettingsViewTests(TestCase):
         self.assertContains(response, 'agent_step')
         self.assertContains(response, 'agent_final')
 
-    def test_post_valid_data_saves_and_redirects(self):
-        url = reverse('bo:agent')
-        response = self.client.post(url, {
+    def _full_form_data(self, **overrides):
+        """Phase 8-6: 5 필드 폼 — 테스트별 override 가능."""
+        data = {
             'enabled': 'on',
             'max_iterations': '4',
             'max_low_relevance_retrieves': '2',
-        })
+            'max_consecutive_failures': '3',
+            'max_repeated_call': '3',
+        }
+        data.update({k: str(v) for k, v in overrides.items()})
+        return data
+
+    def test_post_valid_data_saves_and_redirects(self):
+        url = reverse('bo:agent')
+        response = self.client.post(url, self._full_form_data())
 
         self.assertRedirects(response, url)
         row = AgentSettings.objects.get_solo()
@@ -52,11 +60,7 @@ class AgentSettingsViewTests(TestCase):
 
     def test_post_invalid_max_iterations_returns_form_error(self):
         url = reverse('bo:agent')
-        response = self.client.post(url, {
-            'enabled': 'on',
-            'max_iterations': '99',           # > 12 — validator 위반.
-            'max_low_relevance_retrieves': '3',
-        })
+        response = self.client.post(url, self._full_form_data(max_iterations=99))
 
         # 폼 에러 — redirect 안 함, 같은 페이지 200 + 에러 메시지.
         self.assertEqual(response.status_code, 200)
@@ -67,10 +71,9 @@ class AgentSettingsViewTests(TestCase):
     def test_post_disabling_persists_enabled_false(self):
         url = reverse('bo:agent')
         # checkbox 미전송 = unchecked → enabled=False.
-        response = self.client.post(url, {
-            'max_iterations': '6',
-            'max_low_relevance_retrieves': '3',
-        })
+        data = self._full_form_data()
+        del data['enabled']
+        response = self.client.post(url, data)
 
         self.assertRedirects(response, url)
         row = AgentSettings.objects.get_solo()
@@ -83,6 +86,93 @@ class AgentSettingsViewTests(TestCase):
         response = self.client.get(url)
         # 'section' 컨텍스트는 직접 확인 어렵지만 url_name 이 `agent` 인지 확인.
         self.assertEqual(response.resolver_match.url_name, 'agent')
+
+    # ---------------- Phase 8-6: 새 필드 + audit ----------------
+
+    def test_get_shows_new_extra_limit_fields(self):
+        url = reverse('bo:agent')
+        response = self.client.get(url)
+        self.assertContains(response, '연속 실패 한도')
+        self.assertContains(response, '동일 호출 반복 한도')
+
+    def test_max_repeated_call_one_rejected(self):
+        # P2-3: max_repeated_call=1 form/DB validator 거부.
+        url = reverse('bo:agent')
+        response = self.client.post(url, self._full_form_data(max_repeated_call=1))
+        self.assertEqual(response.status_code, 200)
+        row = AgentSettings.objects.get_solo()
+        self.assertEqual(row.max_repeated_call, 3)
+
+    def test_max_repeated_call_help_text_compatibility_note(self):
+        # P2 보강: 호환/기록용 hint 가 GET 응답 본문에 노출.
+        url = reverse('bo:agent')
+        response = self.client.get(url)
+        self.assertContains(response, '호환/기록용')
+
+    def test_audit_row_created_when_value_changed(self):
+        from chat.models import AgentSettingsAudit
+        before = AgentSettingsAudit.objects.count()
+        url = reverse('bo:agent')
+        # max_iterations 만 4로 변경 (default 6 → 4).
+        self.client.post(url, self._full_form_data(max_iterations=4))
+        self.assertEqual(AgentSettingsAudit.objects.count(), before + 1)
+
+        audit = AgentSettingsAudit.objects.first()
+        # changes — 변경된 필드 (max_iterations) 만.
+        self.assertIn('max_iterations', audit.changes)
+        self.assertEqual(audit.changes['max_iterations']['old'], 6)
+        self.assertEqual(audit.changes['max_iterations']['new'], 4)
+        # 변경 안 된 필드는 changes 에 없음.
+        self.assertNotIn('enabled', audit.changes)
+        self.assertNotIn('max_consecutive_failures', audit.changes)
+
+    def test_audit_snapshot_contains_all_five_fields(self):
+        # P2-2 보강: snapshot 이 변경 후 5 필드 전체 상태를 담음.
+        from chat.models import AgentSettingsAudit
+        url = reverse('bo:agent')
+        self.client.post(url, self._full_form_data(max_iterations=8))
+
+        audit = AgentSettingsAudit.objects.first()
+        self.assertEqual(
+            set(audit.snapshot.keys()),
+            {'enabled', 'max_iterations', 'max_low_relevance_retrieves',
+             'max_consecutive_failures', 'max_repeated_call'},
+        )
+        self.assertEqual(audit.snapshot['max_iterations'], 8)
+
+    def test_audit_row_not_created_when_no_change(self):
+        from chat.models import AgentSettingsAudit
+        # 한 번 저장으로 baseline 잡고, 같은 값으로 다시 저장.
+        url = reverse('bo:agent')
+        self.client.post(url, self._full_form_data(max_iterations=5))
+        before = AgentSettingsAudit.objects.count()
+        # 동일 값으로 또 POST.
+        self.client.post(url, self._full_form_data(max_iterations=5))
+        self.assertEqual(AgentSettingsAudit.objects.count(), before)
+
+    def test_old_value_captured_before_form_binding(self):
+        # P2-1 회귀 가드 — ModelForm.is_valid() 가 cleaned_data 를 form.instance 에
+        # 반영하기 전에 old 값을 캡처해야 변경 감지 정확. 변경 후 audit 의 old 가
+        # 직전 DB 값과 일치하는지.
+        from chat.models import AgentSettingsAudit
+        url = reverse('bo:agent')
+        # baseline: max_iterations=4 로 저장.
+        self.client.post(url, self._full_form_data(max_iterations=4))
+        # 다시 7 로 변경 → audit 의 old 가 4 여야 (form.instance 의 4 가 아니라).
+        self.client.post(url, self._full_form_data(max_iterations=7))
+
+        latest = AgentSettingsAudit.objects.first()
+        self.assertEqual(latest.changes['max_iterations']['old'], 4)
+        self.assertEqual(latest.changes['max_iterations']['new'], 7)
+
+    def test_recent_audits_in_get_response(self):
+        # GET 응답이 최근 audit 행을 본문에 노출.
+        url = reverse('bo:agent')
+        # 변경 한 번 발생시킴.
+        self.client.post(url, self._full_form_data(max_iterations=9))
+        response = self.client.get(url)
+        self.assertContains(response, 'Settings 변경 이력')
+        self.assertContains(response, 'max_iterations')
 
 
 @override_settings(STORAGES=_NO_MANIFEST_STORAGES)

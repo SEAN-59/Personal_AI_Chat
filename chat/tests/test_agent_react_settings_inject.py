@@ -176,3 +176,82 @@ class CompatibilityAliasTests(TestCase):
             react.MAX_LOW_RELEVANCE_RETRIEVES,
             rs.DEFAULT_MAX_LOW_RELEVANCE_RETRIEVES,
         )
+
+    def test_react_max_consecutive_failures_aliased(self):
+        # Phase 8-6.
+        self.assertEqual(
+            react.MAX_CONSECUTIVE_FAILURES,
+            rs.DEFAULT_MAX_CONSECUTIVE_FAILURES,
+        )
+
+    def test_react_max_repeated_call_aliased(self):
+        # Phase 8-6.
+        self.assertEqual(
+            react.MAX_REPEATED_CALL,
+            rs.DEFAULT_MAX_REPEATED_CALL,
+        )
+
+
+class SettingsExtraLimitsInjectTests(TestCase):
+    """Phase 8-6 — max_consecutive_failures / max_repeated_call inject + _decide_termination 단위."""
+
+    def test_max_consecutive_failures_one_terminates_after_first_failure(self):
+        # settings.max_consecutive_failures=1 → 첫 실패 직후 NO_MORE_USEFUL_TOOLS.
+        from chat.models import AgentSettings
+        from chat.services.agent import tools as agent_tools
+        from chat.services.agent.tools import Tool
+        from chat.workflows.domains.field_spec import FieldSpec
+
+        snapshot = agent_tools._snapshot_for_tests()
+        agent_tools._reset_for_tests()
+        agent_tools.register(Tool(
+            name='dummy', description='',
+            input_schema={'query': FieldSpec(type='text', required=True)},
+            callable=lambda args: (_ for _ in ()).throw(RuntimeError('boom')),
+            summarize=lambda r: 'ok',
+        ))
+        try:
+            row = AgentSettings.objects.get_solo()
+            row.max_consecutive_failures = 1
+            row.save()
+
+            replies = [
+                '{"thought": "1", "action": "dummy", "arguments": {"query": "a"}}',
+            ]
+            with patch('chat.services.agent.prompts.load_prompt', return_value='[STUB]'), \
+                    patch('chat.services.agent.react.record_token_usage'), \
+                    patch(
+                        'chat.services.agent.react.run_chat_completion',
+                        side_effect=_completion(*replies),
+                    ):
+                r = react.run_agent('Q', history=[])
+            self.assertEqual(r.status, WorkflowStatus.NOT_FOUND)
+            self.assertEqual(len(r.tool_calls), 1)
+        finally:
+            agent_tools._restore_for_tests(snapshot)
+
+    def test_decide_termination_max_repeated_call_branch(self):
+        # Phase 8-6 P2-2 단위 검증 — 8-3 차단 정책 때문에 run_agent 로는 도달 불가지만
+        # _decide_termination 분기 자체의 회귀 가드. 수동으로 state.tool_calls 구성.
+        from chat.services.agent.react import _decide_termination
+        from chat.services.agent.result import AgentTermination
+        from chat.services.agent.state import AgentState, ToolCall
+
+        state = AgentState(question='Q', history=[])
+        # 같은 (tool, args) 를 3번 record (8-3 차단 우회 시뮬레이션 — 실제 코드는 차단됨).
+        for _ in range(3):
+            state.tool_calls.append(ToolCall(name='dummy', arguments={'query': 'x'}))
+
+        # max_repeated_call=3 → repeated_call_count(dummy, {query:x}) = 3 → >= 3 → 종료.
+        termination = _decide_termination(
+            state, max_iterations=10, max_low_relevance=10,
+            max_consecutive_failures=10, max_repeated_call=3,
+        )
+        self.assertEqual(termination, AgentTermination.NO_MORE_USEFUL_TOOLS)
+
+        # max_repeated_call=4 → 카운터 3 < 4 → 종료 안 함.
+        termination = _decide_termination(
+            state, max_iterations=10, max_low_relevance=10,
+            max_consecutive_failures=10, max_repeated_call=4,
+        )
+        self.assertIsNone(termination)

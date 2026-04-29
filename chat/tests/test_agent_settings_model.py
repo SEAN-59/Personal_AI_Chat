@@ -78,3 +78,32 @@ class FormValidatorsTests(TestCase):
         row.max_low_relevance_retrieves = 11
         with self.assertRaises(ValidationError):
             row.full_clean()
+
+
+class ExtraLimitsTests(TestCase):
+    """Phase 8-6 — max_consecutive_failures / max_repeated_call 새 필드 회귀."""
+
+    def test_default_values_are_three(self):
+        row = AgentSettings.objects.get_solo()
+        self.assertEqual(row.max_consecutive_failures, 3)
+        self.assertEqual(row.max_repeated_call, 3)
+
+    def test_full_clean_rejects_max_repeated_call_below_two(self):
+        # P2-3: max_repeated_call min=2 강제 — 1 이면 첫 정상 tool call 즉시 종료 충돌.
+        row = AgentSettings.objects.get_solo()
+        row.max_repeated_call = 1
+        with self.assertRaises(ValidationError):
+            row.full_clean()
+
+    def test_check_constraint_rejects_max_repeated_call_one(self):
+        # DB-level CheckConstraint 도 1 거부.
+        row = AgentSettings.objects.get_solo()
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                AgentSettings.objects.filter(pk=row.pk).update(max_repeated_call=1)
+
+    def test_check_constraint_rejects_max_consecutive_failures_above_ten(self):
+        row = AgentSettings.objects.get_solo()
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                AgentSettings.objects.filter(pk=row.pk).update(max_consecutive_failures=99)

@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ITERATIONS = 6
 DEFAULT_MAX_LOW_RELEVANCE_RETRIEVES = 3
+# Phase 8-6: 추가 한도 두 개. react.py 의 module-level 상수가 이 값을 alias.
+DEFAULT_MAX_CONSECUTIVE_FAILURES = 3
+DEFAULT_MAX_REPEATED_CALL = 3
 
 
 @dataclass(frozen=True)
@@ -38,17 +41,23 @@ class AgentRuntimeSettings:
 
     `enabled=False` 이면 `agent_node` 가 single_shot 폴백 — `react.run_agent` 는
     아예 호출되지 않는다. enabled 분기는 호출자 (agent_node) 책임.
+
+    Phase 8-6: max_consecutive_failures / max_repeated_call 두 필드 추가.
     """
 
     enabled: bool
     max_iterations: int
     max_low_relevance_retrieves: int
+    max_consecutive_failures: int
+    max_repeated_call: int
 
 
 _DEFAULTS = AgentRuntimeSettings(
     enabled=True,
     max_iterations=DEFAULT_MAX_ITERATIONS,
     max_low_relevance_retrieves=DEFAULT_MAX_LOW_RELEVANCE_RETRIEVES,
+    max_consecutive_failures=DEFAULT_MAX_CONSECUTIVE_FAILURES,
+    max_repeated_call=DEFAULT_MAX_REPEATED_CALL,
 )
 
 
@@ -58,14 +67,21 @@ _DEFAULTS = AgentRuntimeSettings(
 
 _MAX_ITERATIONS_RANGE = (1, 12)
 _MAX_LOW_RELEVANCE_RANGE = (1, 10)
+_MAX_CONSECUTIVE_FAILURES_RANGE = (1, 10)
+# Phase 8-6: max_repeated_call min=2 — 1 이면 첫 정상 tool call 직후 종료 (정책 충돌).
+_MAX_REPEATED_CALL_RANGE = (2, 10)
 
 
 def _is_sane(settings: AgentRuntimeSettings) -> bool:
     mi_lo, mi_hi = _MAX_ITERATIONS_RANGE
     lr_lo, lr_hi = _MAX_LOW_RELEVANCE_RANGE
+    cf_lo, cf_hi = _MAX_CONSECUTIVE_FAILURES_RANGE
+    rc_lo, rc_hi = _MAX_REPEATED_CALL_RANGE
     return (
         mi_lo <= settings.max_iterations <= mi_hi
         and lr_lo <= settings.max_low_relevance_retrieves <= lr_hi
+        and cf_lo <= settings.max_consecutive_failures <= cf_hi
+        and rc_lo <= settings.max_repeated_call <= rc_hi
     )
 
 
@@ -88,6 +104,8 @@ def load_runtime_settings() -> AgentRuntimeSettings:
         enabled=bool(row.enabled),
         max_iterations=int(row.max_iterations),
         max_low_relevance_retrieves=int(row.max_low_relevance_retrieves),
+        max_consecutive_failures=int(row.max_consecutive_failures),
+        max_repeated_call=int(row.max_repeated_call),
     )
 
     if not _is_sane(candidate):
