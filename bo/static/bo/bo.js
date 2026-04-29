@@ -90,8 +90,12 @@
         let firstInvalid = null;
         inputs.forEach((input) => {
           const v = (input.value || '').trim();
-          const min = Number(input.getAttribute('min'));
-          const max = Number(input.getAttribute('max'));
+          // parseFloat 는 null / '' 에 대해 NaN 을 반환 — Number() 와 달리 0 으로
+          // 묵시 변환되지 않아 "속성 없음" 과 "0" 을 명확히 구분한다. 이전 구현은
+          // min/max 속성이 없는 number input (예: RouterRule.priority) 에서 모든
+          // 양수 입력을 0 초과로 판정해 거부하던 회귀의 원인.
+          const min = parseFloat(input.getAttribute('min'));
+          const max = parseFloat(input.getAttribute('max'));
           const num = Number(v);
           let msg = '';
 
