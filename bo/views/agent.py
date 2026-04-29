@@ -8,11 +8,12 @@ from datetime import timedelta
 
 from django import forms
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from chat.models import AgentSettings, TokenUsage
+from chat.models import AgentSettings, AgentSettingsAudit, TokenUsage
 from chat.services.agent import tools as agent_tools
 from chat.services.token_purpose import (
     PURPOSE_AGENT_FINAL,
@@ -21,22 +22,49 @@ from chat.services.token_purpose import (
 )
 
 
+# Phase 8-6: audit 가 추적하는 5 필드. 새 필드 추가 시 한 곳만 갱신.
+AUDIT_FIELDS = (
+    'enabled',
+    'max_iterations',
+    'max_low_relevance_retrieves',
+    'max_consecutive_failures',
+    'max_repeated_call',
+)
+
+# 페이지 하단 audit 섹션 노출 row 수.
+RECENT_AUDIT_LIMIT = 10
+
+
 class AgentSettingsForm(forms.ModelForm):
     """`AgentSettings` 편집 폼. validators 가 자동으로 min/max 범위 강제.
 
     Phase 8-4: 숫자 input 에 `data-shake-input` 추가 — 공용 bo.js 의 initFormShake
     가 hook 으로 사용. HTML5 `required` 미적용 input 이라 명시 opt-in 경로.
+
+    Phase 8-6: max_consecutive_failures (1~10) / max_repeated_call (2~10) 두 필드 추가.
     """
 
     class Meta:
         model = AgentSettings
-        fields = ('enabled', 'max_iterations', 'max_low_relevance_retrieves')
+        fields = (
+            'enabled',
+            'max_iterations',
+            'max_low_relevance_retrieves',
+            'max_consecutive_failures',
+            'max_repeated_call',
+        )
         widgets = {
             'max_iterations': forms.NumberInput(attrs={
                 'class': 'input', 'min': 1, 'max': 12, 'data-shake-input': '1',
             }),
             'max_low_relevance_retrieves': forms.NumberInput(attrs={
                 'class': 'input', 'min': 1, 'max': 10, 'data-shake-input': '1',
+            }),
+            'max_consecutive_failures': forms.NumberInput(attrs={
+                'class': 'input', 'min': 1, 'max': 10, 'data-shake-input': '1',
+            }),
+            'max_repeated_call': forms.NumberInput(attrs={
+                'class': 'input', 'min': 2, 'max': 10, 'data-shake-input': '1',
             }),
             # enabled 는 체크박스 — .input 적용 시 스타일 깨짐.
         }
@@ -83,15 +111,43 @@ def _recent_usage_summary(days: int = 7) -> dict:
 def agent_view(request):
     """`/bo/agent/` GET / POST.
 
-    GET: 현재 settings + tool catalog + 최근 호출 통계.
+    GET: 현재 settings + tool catalog + 최근 호출 통계 + 최근 audit 10건.
     POST: form 검증 후 저장. 잘못된 값은 form error 로 표시 (DB 갱신 안 됨).
+          변경된 필드가 있을 때만 `AgentSettingsAudit` row 생성 (Phase 8-6).
     """
     settings_obj = AgentSettings.objects.get_solo()
 
     if request.method == 'POST':
+        # Phase 8-6 P2-1: form 바인딩 / is_valid() 호출 전에 DB 의 현재 값을 별도 dict
+        # 으로 캡처. ModelForm.is_valid() 가 cleaned_data 를 form.instance 에 반영하므로
+        # form 으로부터 old 를 읽으면 = new 가 되어 변경 감지 실패.
+        old_values = {f: getattr(settings_obj, f) for f in AUDIT_FIELDS}
+
         form = AgentSettingsForm(request.POST, instance=settings_obj)
         if form.is_valid():
-            form.save()
+            with transaction.atomic():
+                saved = form.save()
+
+                # 변경 감지 — old 와 saved 의 새 값 비교, 변경된 필드만 changes.
+                changes = {}
+                for field in AUDIT_FIELDS:
+                    new_val = getattr(saved, field)
+                    if old_values[field] != new_val:
+                        changes[field] = {
+                            'old': old_values[field], 'new': new_val,
+                        }
+
+                # 변경 0 이면 audit row 미생성 (empty save 노이즈 차단).
+                if changes:
+                    snapshot = {f: getattr(saved, f) for f in AUDIT_FIELDS}
+                    AgentSettingsAudit.objects.create(
+                        changed_by=(
+                            request.user if request.user.is_authenticated else None
+                        ),
+                        changes=changes,
+                        snapshot=snapshot,
+                    )
+
             messages.success(request, 'Agent 설정을 저장했습니다.')
             return redirect('bo:agent')
     else:
@@ -103,5 +159,8 @@ def agent_view(request):
         'settings': settings_obj,
         'tool_catalog': _tool_catalog(),
         'recent_usage': _recent_usage_summary(),
+        'recent_audits': list(
+            AgentSettingsAudit.objects.all()[:RECENT_AUDIT_LIMIT]
+        ),
     }
     return render(request, 'bo/agent.html', context)
