@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import CheckConstraint, Q
@@ -327,3 +328,36 @@ class AgentSettings(models.Model):
     def __str__(self):
         on = 'ON' if self.enabled else 'OFF'
         return f'AgentSettings({on}, max_iter={self.max_iterations}, max_low_rel={self.max_low_relevance_retrieves})'
+
+
+class AgentSettingsAudit(models.Model):
+    """`AgentSettings` 변경 이력 (Phase 8-6).
+
+    BO `/bo/agent/` POST 분기에서 form 바인딩 전 DB 값을 별도 캡처 → save 후
+    diff 계산 → 변경된 필드가 있을 때만 본 모델 row 생성. 변경 0 이면 row
+    안 만듦 (empty save 노이즈 차단).
+
+    `changed_by on_delete=SET_NULL` — 운영자 계정 삭제 시 audit row 보존, UI 에서
+    "(삭제된 사용자)" 표시. CASCADE 안 씀 (audit 영구 보존 원칙).
+    """
+
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='+',
+    )
+    # {field: {'old': X, 'new': Y}, ...} — 변경된 필드만 포함.
+    changes = models.JSONField(default=dict)
+    # 변경 후 5 필드 전체 상태 (incident 분석용).
+    snapshot = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ['-changed_at']
+
+    def __str__(self):
+        when = self.changed_at.strftime('%Y-%m-%d %H:%M')
+        who = self.changed_by.username if self.changed_by else '(익명)'
+        fields = ', '.join(self.changes.keys()) if self.changes else '—'
+        return f'[{when}] {who} → {fields}'
