@@ -154,6 +154,89 @@ class RouterRulesBulkActionsTests(TestCase):
 
 
 @override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class DashboardViewTests(TestCase):
+    """Phase 8-5 — `/bo/` 대시보드 GET 회귀 (5 카드 / 비용 컬럼 / purpose 섹션)."""
+
+    def test_get_returns_200_with_five_cards(self):
+        from chat.models import TokenUsage
+        # 시드: 다양한 purpose row.
+        TokenUsage.objects.create(
+            model='gpt-4o-mini', prompt_tokens=1000, completion_tokens=500,
+            total_tokens=1500, purpose='single_shot_answer',
+        )
+        TokenUsage.objects.create(
+            model='gpt-4o-mini', prompt_tokens=200, completion_tokens=100,
+            total_tokens=300, purpose='agent_step',
+        )
+
+        url = reverse('bo:dashboard')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode('utf-8')
+        # 5 카드 (호출 / 총 토큰 / 입력 / 출력 / 비용).
+        self.assertIn('호출 수', body)
+        self.assertIn('총 토큰', body)
+        self.assertIn('입력 토큰', body)
+        self.assertIn('출력 토큰', body)
+        self.assertIn('비용 (USD)', body)
+        # 비용 caption — 자체 추정 / embedding 미포함 명시.
+        self.assertIn('자체 추정', body)
+        self.assertIn('embedding', body)
+
+    def test_purpose_breakdown_section_renders(self):
+        from chat.models import TokenUsage
+        TokenUsage.objects.create(
+            model='gpt-4o-mini', prompt_tokens=1000, completion_tokens=500,
+            total_tokens=1500, purpose='single_shot_answer',
+        )
+        TokenUsage.objects.create(
+            model='gpt-4o-mini', prompt_tokens=200, completion_tokens=100,
+            total_tokens=300, purpose='agent_step',
+        )
+
+        url = reverse('bo:dashboard')
+        response = self.client.get(url)
+        body = response.content.decode('utf-8')
+
+        # purpose 섹션 헤더 + 한국어 라벨 + 영문 코드.
+        self.assertIn('Purpose 별 사용량', body)
+        self.assertIn('single-shot 답변', body)
+        self.assertIn('agent 추론', body)
+        self.assertIn('single_shot_answer', body)
+        self.assertIn('agent_step', body)
+
+    def test_empty_dashboard_shows_empty_states(self):
+        # TokenUsage 0건 — 두 섹션 모두 empty state.
+        url = reverse('bo:dashboard')
+        response = self.client.get(url)
+        body = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('아직 사용 기록이 없습니다', body)
+        self.assertIn('purpose 가 없습니다', body)
+
+    def test_observed_only_does_not_emit_unused_purposes(self):
+        # single_shot_answer 만 있는 환경 → purpose 표에 single_shot_answer 만 등장,
+        # 다른 known purpose (agent_step / workflow_extractor 등) 는 표에 없음.
+        from chat.models import TokenUsage
+        TokenUsage.objects.create(
+            model='gpt-4o-mini', prompt_tokens=1000, completion_tokens=500,
+            total_tokens=1500, purpose='single_shot_answer',
+        )
+
+        url = reverse('bo:dashboard')
+        response = self.client.get(url)
+        body = response.content.decode('utf-8')
+
+        self.assertIn('single_shot_answer', body)
+        # purpose 섹션의 표 row 안에 다른 코드 출현 안 함 (caption 의 일반 단어와 별).
+        # 구체적으로 한국어 라벨 'agent 추론' 가 표에 안 나타나야 함.
+        self.assertNotIn('agent 추론', body)
+        self.assertNotIn('workflow 입력 추출', body)
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
 class BoSharedPartialsMarkupTests(TestCase):
     """Phase 8-4 — `bo.js` 가 동작하기 위한 마크업 attribute 회귀 가드."""
 

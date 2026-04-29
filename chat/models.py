@@ -114,6 +114,9 @@ class TokenUsage(models.Model):
     completion_tokens = models.PositiveIntegerField(default=0)
     total_tokens = models.PositiveIntegerField(default=0)
     purpose = models.CharField(max_length=32, default='unknown', db_index=True)
+    # Phase 8-5: 채팅 LLM 호출 비용의 자체 추정치 (USD). 단가 매핑 × 토큰.
+    # 시점 cost 보존 정책 — 단가가 후에 바뀌어도 과거 row 는 옛 값 그대로.
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
