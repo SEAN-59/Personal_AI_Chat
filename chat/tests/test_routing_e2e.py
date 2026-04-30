@@ -90,3 +90,60 @@ class AgentRoutingTests(TestCase):
     def test_우주여행_비교(self):
         decision = route_question('우주여행 비용 비교')
         self.assertEqual(decision.route, ROUTE_AGENT)
+
+
+class DateConditionRoutingTests(TestCase):
+    """v0.4.2 (이슈 #73) — DATE_CONDITION_KEYWORDS 코드 fallback tier.
+
+    DB RouterRule fixture 없이 코드 키워드만으로 agent 로 라우팅되는지,
+    그리고 WORKFLOW_KEYWORDS 와 충돌하는 합성 질문에서도 DATE_CONDITION 이
+    이기는지 검증.
+    """
+
+    def test_simple_지급일(self):
+        decision = route_question('지급일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+        self.assertIn('지급일', decision.matched_rules)
+
+    def test_simple_만료일(self):
+        decision = route_question('만료일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_simple_정산일(self):
+        decision = route_question('정산일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_simple_마감일(self):
+        decision = route_question('마감일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_collision_급여_지급일(self):
+        # `급여` (WORKFLOW) + `지급일` (DATE_CONDITION) 동시 매치 — DATE_CONDITION 우선.
+        decision = route_question('26년 6월 급여 지급일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_collision_퇴직금_만료일(self):
+        decision = route_question('퇴직금 신청 만료일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_collision_수당_정산일(self):
+        decision = route_question('수당 정산일 알려줘')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_collision_연차_마감일(self):
+        decision = route_question('연차 신청 마감일은 며칠까지?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+
+    def test_negative_급여_얼마(self):
+        # DATE_CONDITION 미매치 — WORKFLOW 그대로 (기존 동작 유지).
+        decision = route_question('급여는 얼마야?')
+        self.assertEqual(decision.route, ROUTE_WORKFLOW)
+        self.assertEqual(decision.reason, 'workflow_keyword')
