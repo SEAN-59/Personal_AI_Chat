@@ -84,6 +84,35 @@ class RouterRuleForm(forms.ModelForm):
         # 조회해 choices 를 채운다. 빈 값 포함.
         self.fields['workflow_key'].choices = _workflow_key_choices()
 
+    def clean(self):
+        """같은 (pattern, match_type) 조합의 다른 RouterRule 이 이미 있으면 거부.
+
+        v0.4.2 (이슈 #73 검증 중 발견) — 운영자가 BO 에서 같은 키워드를 실수로
+        두 번 등록할 수 있었음 (`며칠` rule 이 두 개 등록되어 있던 사례). 띄어쓰기
+        포함 정확히 일치하는 패턴 + match_type 조합은 단일 rule 로 충분.
+
+        편집 모드에선 자기 자신은 제외해야 self-conflict 안남 (`pk` 비교).
+        """
+        cleaned = super().clean()
+        pattern = cleaned.get('pattern', '')
+        match_type = cleaned.get('match_type')
+        if not pattern or not match_type:
+            return cleaned
+
+        existing = RouterRule.objects.filter(
+            pattern=pattern, match_type=match_type,
+        )
+        if self.instance.pk is not None:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            other = existing.first()
+            raise forms.ValidationError(
+                f'같은 키워드 "{pattern}" + 매칭 방식 "{match_type}" 의 규칙이 '
+                f'이미 있습니다 (이름: "{other.name}"). 기존 규칙을 수정하거나 '
+                f'다른 키워드를 사용하세요.'
+            )
+        return cleaned
+
 
 def router_rules_index(request):
     """RouterRule 목록 + 코드 내장 기본 키워드(읽기 전용).
