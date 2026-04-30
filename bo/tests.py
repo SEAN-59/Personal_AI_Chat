@@ -243,6 +243,67 @@ class RouterRulesBulkActionsTests(TestCase):
         self.assertFalse(RouterRule.objects.filter(pk=self.r1.pk).exists())
 
 
+class RouterRuleFormDuplicatePreventionTests(TestCase):
+    """v0.4.2 (이슈 #73 검증 부산물) — 같은 (pattern, match_type) RouterRule 중복 등록 거부."""
+
+    def setUp(self):
+        from chat.models import RouterRule
+        self.existing = RouterRule.objects.create(
+            name='기존 며칠', route='workflow', match_type='contains',
+            pattern='며칠', priority=100, enabled=True,
+            workflow_key='date_calculation',
+        )
+
+    def _form_data(self, **overrides):
+        data = {
+            'name': '신규 며칠',
+            'route': 'workflow',
+            'match_type': 'contains',
+            'pattern': '며칠',
+            'workflow_key': 'date_calculation',
+            'priority': 100,
+            'enabled': 'on',
+            'description': '',
+        }
+        data.update(overrides)
+        return data
+
+    def test_duplicate_pattern_match_type_rejected(self):
+        from bo.views.router_rules import RouterRuleForm
+        form = RouterRuleForm(self._form_data())
+        self.assertFalse(form.is_valid())
+        self.assertIn('이미 있습니다', str(form.errors))
+
+    def test_different_match_type_allowed(self):
+        from bo.views.router_rules import RouterRuleForm
+        # 같은 pattern 이라도 match_type 이 다르면 허용 (현재는 contains 만 사용중이지만
+        # 미래 정확 일치 / 정규식 도입 시를 대비).
+        form = RouterRuleForm(self._form_data(match_type='exact'))
+        self.assertFalse(form.is_valid())  # exact 가 choices 에 없으면 form 자체 invalid
+        # 하지만 pattern/match_type 충돌 에러는 없어야 함.
+        self.assertNotIn('이미 있습니다', str(form.errors))
+
+    def test_different_pattern_allowed(self):
+        from bo.views.router_rules import RouterRuleForm
+        form = RouterRuleForm(self._form_data(pattern='몇 일'))
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+    def test_whitespace_distinguished(self):
+        from bo.views.router_rules import RouterRuleForm
+        # `며칠` 과 `며 칠` 은 다른 패턴 — 띄어쓰기까지 정확히 일치할 때만 충돌.
+        form = RouterRuleForm(self._form_data(pattern='며 칠'))
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+    def test_edit_self_does_not_self_conflict(self):
+        from bo.views.router_rules import RouterRuleForm
+        # 기존 rule 편집 시 자기 자신은 제외 — 패턴 그대로 두고 다른 필드만 수정 가능.
+        form = RouterRuleForm(
+            self._form_data(name='이름만 변경'),
+            instance=self.existing,
+        )
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+
 @override_settings(STORAGES=_NO_MANIFEST_STORAGES)
 class DashboardViewTests(TestCase):
     """Phase 8-5 — `/bo/` 대시보드 GET 회귀 (5 카드 / 비용 컬럼 / purpose 섹션)."""

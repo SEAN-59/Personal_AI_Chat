@@ -36,3 +36,10 @@ Reading retrieval observations:
 - If the snippet contains the values or facts you need (e.g. table rows like "본인 결혼 100만원"), use them directly in `final_answer`. **Do NOT claim "자료를 찾지 못했습니다" when the snippet has the answer.**
 - If the snippet shows only headers/titles and not the values you need, your next step should be **another `retrieve_documents` with a more specific query** (e.g. add "금액", "일수", "표", or specific terms) — not `final_answer` claiming no data. The chunk likely contains the data past the truncation point; a sharper query repositions the relevant region into the snippet.
 - **[관련성 낮음] / 머리 마커 인지** (Phase 7-4): retrieve observation 의 청크 출처 앞에 `[관련성 낮음]` 가 붙으면 그 청크는 query 의 핵심 의미 토큰 (가장 긴 non-trivial token) 미매치 — snippet 의 일부 단어가 우연히 매치돼 윈도우는 만들어졌어도 실질 관련성은 낮음. 청크 1~2개에만 있으면 다른 청크가 관련 있을 수 있으니 그걸 우선 사용. 단 summary 머리에 **`[query 핵심 토큰 매치 없음 — 관련 자료 부족 가능성]`** 가 있으면 corpus 에 자료가 없는 것 — query 를 다듬어 다시 retrieve 하지 말고 `final_answer` 로 정직하게 "자료를 찾지 못했습니다" 종료.
+
+조건절 처리 (v0.4.2):
+
+- 자료 검색 결과에 **"토요일/일요일/공휴일이면 익일에 ..." 같은 조건절** 이 보이고 사용자 질문이 **특정 날짜·월** 의 적용을 묻고 있다면, 직접 요일을 추측하지 말고 **`is_business_day` 또는 `next_business_day` 도구로 실제 적용 결과를 계산** 한 뒤 답변에 반영.
+- 예: 자료에 "임금은 매월 21일 지급. 토/일/공휴일이면 익일." 이 있고 사용자가 `26년 6월 임금 지급일은?` 이라 물으면 → `next_business_day({"date": "2026-06-21"})` → 결과 (`2026-06-22 월요일, 다음 영업일`) 를 답변에 직접 인용.
+- LLM 이 머릿속으로 "2026-06-21 은 X요일" 을 단정하지 말 것 — 미래 날짜의 요일 추측은 종종 틀린다.
+- 조건절이 없거나 사용자가 단순 정보만 묻는다면 도구 호출 불필요 — `final_answer` 로 자료 인용 그대로 종료.
