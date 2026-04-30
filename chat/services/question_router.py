@@ -1,10 +1,13 @@
-"""질문 분류기 (Phase 4-2 / Phase 6-1 확장).
+"""질문 분류기 (Phase 4-2 / Phase 6-1 / v0.4.2 확장).
 
 graph 의 router_node 가 부른다. 우선순위는:
 
     1. DB RouterRule 조회 (enabled=True, priority DESC) — 매치 있으면 해당 route
-    2. 코드 상수(WORKFLOW_KEYWORDS / AGENT_KEYWORDS) 키워드 매칭
-    3. 그래도 없으면 'single_shot' (default)
+    2. 코드 상수 DATE_CONDITION_KEYWORDS (v0.4.2 — 조건절 적용이 필요한 날짜 질문)
+       → agent (calendar 도구 활용)
+    3. 코드 상수 WORKFLOW_KEYWORDS → workflow
+    4. 코드 상수 AGENT_KEYWORDS → agent
+    5. 그래도 없으면 'single_shot' (default)
 
 코드 상수는 **영구 보존되는 기본 동작**이다. DB rule 은 운영 중 조정하는
 override 계층. BO 에서 rule 을 다 지우거나 DB 가 비어있어도 코드 키워드로
@@ -35,6 +38,15 @@ from typing import List, Optional
 from chat.graph.routes import ROUTE_AGENT, ROUTE_SINGLE_SHOT, ROUTE_WORKFLOW
 
 
+# 조건절 적용이 필요한 날짜 질문 신호 (v0.4.2, 이슈 #73).
+# 자료 안의 "토/공휴일이면 익일" 류 조건절을 실제 달력에 적용하려면 agent 의
+# calendar 도구 (`is_business_day` / `next_business_day`) 가 필요. WORKFLOW_KEYWORDS
+# 보다 **먼저** 평가 — `급여 지급일은?` 같은 합성 질문이 `급여` (WORKFLOW) 에
+# 가로채지지 않도록.
+DATE_CONDITION_KEYWORDS: tuple[str, ...] = (
+    '지급일', '만료일', '정산일', '마감일',
+)
+
 # 정형 계산·산정 성격 질문 신호.
 # BO RouterRule 이 비어있을 때의 fallback 키워드 — '기본 동작' 역할.
 WORKFLOW_KEYWORDS: tuple[str, ...] = (
@@ -56,10 +68,11 @@ class RouteDecision:
     """라우터 결정.
 
     reason 포맷:
-      - 'db_rule:<name>'      — DB RouterRule 매치
-      - 'workflow_keyword'    — 코드 WORKFLOW_KEYWORDS 매치
-      - 'agent_keyword'       — 코드 AGENT_KEYWORDS 매치
-      - 'default'             — 아무것도 매치 안 됨
+      - 'db_rule:<name>'         — DB RouterRule 매치
+      - 'date_condition_keyword' — 코드 DATE_CONDITION_KEYWORDS 매치 (v0.4.2)
+      - 'workflow_keyword'       — 코드 WORKFLOW_KEYWORDS 매치
+      - 'agent_keyword'          — 코드 AGENT_KEYWORDS 매치
+      - 'default'                — 아무것도 매치 안 됨
 
     `workflow_key` (Phase 6-1): `route == 'workflow'` 일 때 어떤 generic
     workflow 로 보낼지. DB RouterRule 이 지정한 값이면 그대로, 코드 키워드
@@ -109,6 +122,16 @@ def route_question(question: str) -> RouteDecision:
     db_decision = _match_db_rules(question)
     if db_decision is not None:
         return db_decision
+
+    # v0.4.2: DATE_CONDITION 을 WORKFLOW 보다 먼저 평가 — 합성 질문 (`급여 지급일`)
+    # 이 WORKFLOW `급여` 에 가로채지지 않게.
+    hits = _matches(question, DATE_CONDITION_KEYWORDS)
+    if hits:
+        return RouteDecision(
+            route=ROUTE_AGENT,
+            reason='date_condition_keyword',
+            matched_rules=hits,
+        )
 
     hits = _matches(question, WORKFLOW_KEYWORDS)
     if hits:

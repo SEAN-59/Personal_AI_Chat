@@ -1,9 +1,12 @@
-"""Agent 가 처음 쓰는 세 도구 등록 (Phase 7-1).
+"""Agent 도구 등록.
 
   - `retrieve_documents` — Phase 6-3 와 같은 reranker 포함 retrieval. schema 모드.
   - `find_canonical_qa` — 과거 승격된 Q&A 임베딩 검색. schema 모드.
   - `run_workflow` — 등록된 generic workflow 를 그대로 실행. raw 모드 (입력 형태가
     `workflow_key` 마다 달라서 schema 로 강제할 수 없음).
+  - `weekday_of` / `is_business_day` / `next_business_day` (v0.4.2, 이슈 #73) —
+    한국 달력 기준 요일·영업일 판단. 자료 안의 "토/공휴일이면 익일" 류 조건절을
+    실제 날짜에 적용할 때 agent 가 호출.
 
 각 도구는 callable 결과를 LLM 이 다시 보기 좋은 짧은 한국어 한두 줄로 요약한다.
 원본 응답 전체를 다음 iteration 에 올리지 않는다 — 컨텍스트 폭주 방지.
@@ -13,7 +16,10 @@ from __future__ import annotations
 
 import re
 import string
+from datetime import date, datetime, timedelta
 from typing import Any, List, Mapping
+
+import holidays
 
 from chat.services.agent.tools import Tool, register
 from chat.services.single_shot.qa_cache import find_canonical_qa as _qa_cache_find
@@ -358,6 +364,135 @@ def _retrieve_failure_check(result: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Calendar tools (v0.4.2, 이슈 #73)
+# ---------------------------------------------------------------------------
+#
+# 한국 달력 기준 요일·영업일 판단. 자료 안의 "토/공휴일이면 익일" 류 조건절을
+# 실제 날짜에 적용할 때 agent 가 호출한다.
+#
+# 도구 입력은 단일 string `date` 필드로 통일 — agent 가 `arguments={"date":
+# "2026-06-21"}` 형태로 호출. 형식 파싱 실패는 callable 에서 ValueError 를
+# 던져 `tools.call()` 의 `failure_kind='callable_error'` 분기에 흡수 — ReAct
+# loop 가 다른 형식 (`2026.06.21` → `2026-06-21`) 으로 자유롭게 retry.
+
+_KR_HOLIDAYS = holidays.KR(language='ko')  # 한국어 공휴일명. 전역 1회 생성, thread-safe.
+
+_WEEKDAY_KO: tuple[str, ...] = ('월', '화', '수', '목', '금', '토', '일')
+
+# 받아들이는 형식: 2026-06-21 / 2026/06/21 / 2026.06.21 / 20260621.
+# 다른 형식은 ValueError 로 거부 — agent 가 다시 정규화하도록.
+_DATE_FORMATS: tuple[str, ...] = ('%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d', '%Y%m%d')
+
+
+def _parse_date(raw: Any) -> date:
+    """문자열 또는 date 를 표준 `date` 로 변환. 실패 시 ValueError."""
+    if isinstance(raw, date) and not isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, datetime):
+        return raw.date()
+    if not isinstance(raw, str):
+        raise ValueError(f'date 입력은 문자열이어야 합니다: type={type(raw).__name__}')
+    text = raw.strip()
+    if not text:
+        raise ValueError('date 입력이 비어 있습니다.')
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(
+        f'date 형식을 인식하지 못했습니다: {text!r} '
+        f'(허용: YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD / YYYYMMDD)'
+    )
+
+
+def _is_business_day_check(d: date) -> bool:
+    """주말이거나 한국 공휴일이면 False, 그 외 True."""
+    if d.weekday() >= 5:  # 5=토, 6=일
+        return False
+    if d in _KR_HOLIDAYS:
+        return False
+    return True
+
+
+# weekday_of -----------------------------------------------------------------
+
+def _weekday_of_callable(arguments: Mapping[str, Any]) -> dict:
+    d = _parse_date(arguments.get('date'))
+    return {'date': d.isoformat(), 'weekday': _WEEKDAY_KO[d.weekday()]}
+
+
+def _summarize_weekday_of(result: Any) -> str:
+    if not isinstance(result, dict):
+        return f'예상치 못한 응답 형식: {type(result).__name__}'
+    return f"{result.get('date')} = {result.get('weekday')}요일"
+
+
+# is_business_day ------------------------------------------------------------
+
+def _is_business_day_callable(arguments: Mapping[str, Any]) -> dict:
+    d = _parse_date(arguments.get('date'))
+    is_bd = _is_business_day_check(d)
+    holiday_name = _KR_HOLIDAYS.get(d) if d in _KR_HOLIDAYS else None
+    return {
+        'date': d.isoformat(),
+        'weekday': _WEEKDAY_KO[d.weekday()],
+        'is_business_day': is_bd,
+        'holiday_name': holiday_name,
+    }
+
+
+def _summarize_is_business_day(result: Any) -> str:
+    if not isinstance(result, dict):
+        return f'예상치 못한 응답 형식: {type(result).__name__}'
+    iso = result.get('date')
+    weekday = result.get('weekday')
+    if result.get('is_business_day'):
+        return f'{iso} ({weekday}요일) = 영업일'
+    holiday = result.get('holiday_name')
+    if holiday:
+        return f'{iso} ({weekday}요일) = 휴일 — {holiday}'
+    return f'{iso} ({weekday}요일) = 휴일 (주말)'
+
+
+# next_business_day ----------------------------------------------------------
+
+# 무한 루프 방어 — 한국 공휴일이 연속으로 일주일 이상 이어지는 경우는 없음.
+# 30 으로 잡으면 어떤 케이스도 안전.
+_NEXT_BUSINESS_DAY_MAX_STEPS = 30
+
+
+def _next_business_day_callable(arguments: Mapping[str, Any]) -> dict:
+    """입력 날짜가 영업일이면 그대로, 아니면 다음 영업일을 반환."""
+    d = _parse_date(arguments.get('date'))
+    cursor = d
+    for _ in range(_NEXT_BUSINESS_DAY_MAX_STEPS):
+        if _is_business_day_check(cursor):
+            return {
+                'input_date': d.isoformat(),
+                'next_business_day': cursor.isoformat(),
+                'weekday': _WEEKDAY_KO[cursor.weekday()],
+                'shifted': cursor != d,
+            }
+        cursor += timedelta(days=1)
+    # 30일 안에도 못 찾으면 데이터 이상 — 보호적 raise.
+    raise ValueError(
+        f'next_business_day: {d.isoformat()} 부터 {_NEXT_BUSINESS_DAY_MAX_STEPS}일 안에 영업일을 찾지 못함.'
+    )
+
+
+def _summarize_next_business_day(result: Any) -> str:
+    if not isinstance(result, dict):
+        return f'예상치 못한 응답 형식: {type(result).__name__}'
+    in_iso = result.get('input_date')
+    out_iso = result.get('next_business_day')
+    weekday = result.get('weekday')
+    if result.get('shifted'):
+        return f'{in_iso} → {out_iso} ({weekday}요일, 다음 영업일)'
+    return f'{in_iso} = 영업일 그대로 ({weekday}요일)'
+
+
+# ---------------------------------------------------------------------------
 # 등록 — import 부작용
 # ---------------------------------------------------------------------------
 
@@ -401,4 +536,49 @@ register(Tool(
     input_schema=None,   # raw 모드 — workflow_key 마다 input 형태가 달라 schema 강제 X
     callable=_workflow_callable,
     summarize=_summarize_workflow,
+))
+
+
+# v0.4.2 (이슈 #73) — agent 가 자료의 conditional date clause 를 실제 달력에 적용.
+
+register(Tool(
+    name='weekday_of',
+    description=(
+        '주어진 날짜의 요일을 한국어 한 글자로 반환합니다 (월/화/수/목/금/토/일). '
+        'arguments: {"date": "YYYY-MM-DD"} (또는 YYYY/MM/DD, YYYY.MM.DD, YYYYMMDD).'
+    ),
+    input_schema={
+        'date': FieldSpec(type='text', required=True, aliases=('date', '날짜')),
+    },
+    callable=_weekday_of_callable,
+    summarize=_summarize_weekday_of,
+))
+
+
+register(Tool(
+    name='is_business_day',
+    description=(
+        '주어진 날짜가 영업일(주말·한국 공휴일이 아닌 평일)인지 판단합니다. '
+        'arguments: {"date": "YYYY-MM-DD"}. 반환에 holiday_name 이 있으면 공휴일.'
+    ),
+    input_schema={
+        'date': FieldSpec(type='text', required=True, aliases=('date', '날짜')),
+    },
+    callable=_is_business_day_callable,
+    summarize=_summarize_is_business_day,
+))
+
+
+register(Tool(
+    name='next_business_day',
+    description=(
+        '주어진 날짜가 영업일이면 그대로, 주말·공휴일이면 다음 영업일을 반환합니다. '
+        '"토/공휴일이면 익일" 류 규정의 실제 적용일 계산용. '
+        'arguments: {"date": "YYYY-MM-DD"}.'
+    ),
+    input_schema={
+        'date': FieldSpec(type='text', required=True, aliases=('date', '날짜')),
+    },
+    callable=_next_business_day_callable,
+    summarize=_summarize_next_business_day,
 ))
