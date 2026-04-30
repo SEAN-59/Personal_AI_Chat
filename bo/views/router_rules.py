@@ -16,7 +16,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from chat.models import RouterRule
-from chat.services.question_router import AGENT_KEYWORDS, WORKFLOW_KEYWORDS
+from chat.services.question_router import (
+    AGENT_KEYWORDS,
+    DATE_CONDITION_KEYWORDS,
+    WORKFLOW_KEYWORDS,
+)
 
 
 # 페이지당 RouterRule 수 — 운영자가 한 화면에서 훑기 좋은 양 + 코드 키워드
@@ -98,6 +102,7 @@ def router_rules_index(request):
         'rules': page_obj,                 # 템플릿에서 for 순회 시 현재 페이지 항목
         'page_obj': page_obj,              # 페이지네이션 컨트롤용
         'total_count': paginator.count,
+        'date_condition_keywords': DATE_CONDITION_KEYWORDS,
         'workflow_keywords': WORKFLOW_KEYWORDS,
         'agent_keywords': AGENT_KEYWORDS,
     }

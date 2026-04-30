@@ -273,6 +273,19 @@
   <div class="defaults-body">
     <div class="card">
       <div class="defaults-card-header">
+        <span class="badge badge-warning">agent (조건절)</span>
+      </div>
+      <div class="defaults-card-keywords">
+        {% for kw in date_condition_keywords %}
+          <span class="kw-tag">{{ kw }}</span>
+        {% endfor %}
+      </div>
+      <div class="defaults-card-note">
+        조건절 적용이 필요한 날짜 질문 — 자료의 "토/공휴일이면 익일" 류를 calendar 도구로 처리하기 위해 agent 로 라우팅. WORKFLOW 보다 먼저 평가 (v0.4.2).
+      </div>
+    </div>
+    <div class="card">
+      <div class="defaults-card-header">
         <span class="badge badge-info">workflow</span>
       </div>
       <div class="defaults-card-keywords">
