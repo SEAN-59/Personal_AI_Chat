@@ -99,9 +99,16 @@ def call(name: str, arguments: Mapping[str, Any]) -> Observation:
       진입 직후로 이동해 unknown_tool 분기에서도 args 가 정의됨.
     - callable 결과가 dict 이고 `'evidence'` 키가 있으면 `evidence=tuple(...)`
       로 obs 에 부착 (retrieve_documents 의 top-1 SourceRef 노출 경로).
+
+    Phase 9-1 회귀 (`급여 지급일`): schema 모드 도구는 검증/callable 전에
+    `FieldSpec.aliases` 를 실제로 적용한다 — LLM 이 `{'text': '급여 지급일'}` 처럼
+    alias key 로 호출해도 canonical `query` 로 정규화되어 통과한다. `Observation.
+    arguments` 는 LLM 이 실제 시도한 원본 args 를 보존해 trace 일관성 유지.
     """
     # Phase 8-1: args 정규화를 lookup 보다 먼저 — unknown_tool 도 args 보존.
-    args = dict(arguments or {})
+    # Phase 9-1: 원본 args (raw_args) 는 Observation 에 그대로 박고, alias
+    # 정규화한 사본 (call_args) 만 validation / callable 로 흘려보낸다.
+    raw_args = dict(arguments or {})
 
     tool = _REGISTRY.get(name)
     if tool is None:
@@ -110,11 +117,12 @@ def call(name: str, arguments: Mapping[str, Any]) -> Observation:
             summary=f'unknown tool: {name!r}',
             is_failure=True,
             failure_kind='unknown_tool',
-            arguments=args,
+            arguments=raw_args,
         )
 
     if tool.input_schema is not None:
-        validation = _validate_against_schema(args, tool.input_schema)
+        call_args = _apply_aliases(raw_args, tool.input_schema)
+        validation = _validate_against_schema(call_args, tool.input_schema)
         if not validation.ok:
             problem = _format_validation(validation)
             return Observation(
@@ -122,18 +130,21 @@ def call(name: str, arguments: Mapping[str, Any]) -> Observation:
                 summary=f'input invalid: {problem}',
                 is_failure=True,
                 failure_kind='schema_invalid',
-                arguments=args,
+                arguments=raw_args,
             )
+    else:
+        # raw 모드: alias 정규화 대상 schema 가 없으므로 원본 그대로 통과.
+        call_args = raw_args
 
     try:
-        raw_result = tool.callable(args)
+        raw_result = tool.callable(call_args)
     except Exception as exc:                                          # noqa: BLE001
         return Observation(
             tool=name,
             summary=f'tool error: {type(exc).__name__}: {exc}',
             is_failure=True,
             failure_kind='callable_error',
-            arguments=args,
+            arguments=raw_args,
         )
 
     try:
@@ -145,7 +156,7 @@ def call(name: str, arguments: Mapping[str, Any]) -> Observation:
             tool=name,
             summary=f'tool ok, but summarize failed: {type(exc).__name__}',
             is_failure=False,
-            arguments=args,
+            arguments=raw_args,
         )
 
     # Phase 7-4: failure_check — callable 정상 반환했어도 의미상 실패로 분류할지.
@@ -170,13 +181,39 @@ def call(name: str, arguments: Mapping[str, Any]) -> Observation:
     return Observation(
         tool=name, summary=summary,
         is_failure=is_failure, failure_kind=failure_kind,
-        arguments=args, evidence=evidence,
+        arguments=raw_args, evidence=evidence,
     )
 
 
 # ---------------------------------------------------------------------------
 # 내부
 # ---------------------------------------------------------------------------
+
+def _apply_aliases(
+    arguments: Mapping[str, Any],
+    schema: Mapping[str, FieldSpec],
+) -> dict[str, Any]:
+    """Phase 9-1: schema 의 `FieldSpec.aliases` 를 실제로 적용해 canonical 키로 정규화.
+
+    LLM 이 `{'text': '급여 지급일'}` 처럼 alias 키로 도구를 호출해도, 스키마가
+    `query` 의 alias 로 `'text'` 를 포함하면 `{'query': '급여 지급일'}` 로 바뀌어
+    검증과 callable 단계로 흐른다. canonical 키가 이미 있으면 alias 는 무시.
+
+    원본 `arguments` 는 변경하지 않고 새 dict 를 돌려준다 — 호출부가 raw 와 normalized
+    를 분리해 보관할 수 있게.
+    """
+    normalized: dict[str, Any] = dict(arguments)
+    for canonical, spec in schema.items():
+        if canonical in normalized:
+            continue
+        for alias in spec.aliases:
+            if alias == canonical:
+                continue
+            if alias in normalized:
+                normalized[canonical] = normalized.pop(alias)
+                break
+    return normalized
+
 
 def _validate_against_schema(
     arguments: Mapping[str, Any],

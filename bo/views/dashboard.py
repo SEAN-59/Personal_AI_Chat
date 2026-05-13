@@ -10,6 +10,7 @@ from chat.models import TokenUsage
 from chat.services.token_purpose import (
     PURPOSE_AGENT_FINAL,
     PURPOSE_AGENT_STEP,
+    PURPOSE_LLM_ROUTER,
     PURPOSE_QUERY_REWRITER,
     PURPOSE_SINGLE_SHOT_ANSWER,
     PURPOSE_UNKNOWN,
@@ -34,6 +35,7 @@ _PURPOSE_LABELS = {
     PURPOSE_WORKFLOW_TABLE_LOOKUP: 'workflow 표 조회',
     PURPOSE_AGENT_STEP: 'agent 추론',
     PURPOSE_AGENT_FINAL: 'agent 최종 답변',
+    PURPOSE_LLM_ROUTER: 'LLM 라우터',
     PURPOSE_UNKNOWN: '미상',
 }
 

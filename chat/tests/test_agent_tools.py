@@ -293,3 +293,66 @@ class ToolsEvidenceAttachmentTests(SimpleTestCase):
         tools.register(_raw_tool(lambda args: 'ok'))
         obs = tools.call('raw_op', {})
         self.assertEqual(obs.evidence, ())
+
+
+# ---------------------------------------------------------------------------
+# Phase 9-1: FieldSpec.aliases 정규화 — schema 모드에서 alias 키로 호출해도
+# canonical 키로 변환돼 validation / callable 단계를 통과.
+# ---------------------------------------------------------------------------
+
+
+class ToolsAliasNormalizationTests(SimpleTestCase):
+    """Phase 9-1: `FieldSpec.aliases` 가 schema 검증/callable 전에 적용된다.
+
+    수신 시 `급여 지급일` 질문에서 LLM 이 `{'text': '급여 지급일'}` 로 호출하던
+    회귀가 핵심 동기 — 'text' alias 가 'query' 로 정규화돼 schema_invalid 가
+    나지 않아야 한다. Observation.arguments 는 LLM 이 실제 시도한 raw 를 보존.
+    """
+
+    def setUp(self):
+        self._snapshot = tools._snapshot_for_tests()
+        tools._reset_for_tests()
+
+    def tearDown(self):
+        tools._restore_for_tests(self._snapshot)
+
+    def _alias_tool(self, *, callable_):
+        # 'query' 의 alias 로 'text' 를 가진 schema 모드 도구.
+        return tools.Tool(
+            name='aliased',
+            description='alias test',
+            input_schema={
+                'query': FieldSpec(type='text', required=True, aliases=('query', 'text')),
+            },
+            callable=callable_,
+            summarize=lambda result: f'echoed: {result}',
+        )
+
+    def test_alias_key_renamed_to_canonical_before_callable(self):
+        # callable 은 normalized args 를 받음 — 'query' 키로 도착.
+        seen: list = []
+        tools.register(self._alias_tool(callable_=lambda args: seen.append(dict(args)) or args['query']))
+        obs = tools.call('aliased', {'text': '급여 지급일'})
+        self.assertFalse(obs.is_failure)
+        self.assertEqual(seen, [{'query': '급여 지급일'}])
+        # Observation 은 LLM 의 raw args 그대로 보존.
+        self.assertEqual(dict(obs.arguments), {'text': '급여 지급일'})
+
+    def test_missing_required_still_schema_invalid_with_raw_args(self):
+        # alias 도 canonical 도 없으면 여전히 schema_invalid — raw args 보존.
+        tools.register(self._alias_tool(callable_=lambda args: 'unreachable'))
+        obs = tools.call('aliased', {'unrelated': 'x'})
+        self.assertTrue(obs.is_failure)
+        self.assertEqual(obs.failure_kind, 'schema_invalid')
+        self.assertIn('query', obs.summary)
+        self.assertEqual(dict(obs.arguments), {'unrelated': 'x'})
+
+    def test_canonical_key_takes_precedence_over_alias(self):
+        # canonical 'query' 가 있으면 alias 'text' 는 무시.
+        seen: list = []
+        tools.register(self._alias_tool(callable_=lambda args: seen.append(dict(args)) or args['query']))
+        obs = tools.call('aliased', {'query': 'canonical', 'text': 'alias'})
+        self.assertFalse(obs.is_failure)
+        self.assertEqual(seen, [{'query': 'canonical', 'text': 'alias'}])
+        # Observation 은 raw args 모두 보존.
+        self.assertEqual(dict(obs.arguments), {'query': 'canonical', 'text': 'alias'})

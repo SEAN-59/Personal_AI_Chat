@@ -345,6 +345,10 @@ class DashboardViewTests(TestCase):
             model='gpt-4o-mini', prompt_tokens=200, completion_tokens=100,
             total_tokens=300, purpose='agent_step',
         )
+        TokenUsage.objects.create(
+            model='gpt-4o-mini', prompt_tokens=80, completion_tokens=40,
+            total_tokens=120, purpose='llm_router',
+        )
 
         url = reverse('bo:dashboard')
         response = self.client.get(url)
@@ -356,6 +360,8 @@ class DashboardViewTests(TestCase):
         self.assertIn('agent 추론', body)
         self.assertIn('single_shot_answer', body)
         self.assertIn('agent_step', body)
+        self.assertIn('LLM 라우터', body)
+        self.assertIn('llm_router', body)
 
     def test_empty_dashboard_shows_empty_states(self):
         # TokenUsage 0건 — 두 섹션 모두 empty state.
