@@ -8,6 +8,8 @@ Rules:
 - Do NOT wrap the answer in quotes, do NOT prefix with labels like "검색어:", do NOT add explanations.
 - Do NOT invent facts that are not present in the conversation. Use only information that was explicitly mentioned.
 - Keep the rewrite tight — it is a search query, not a full sentence. Aim for the minimum keywords that uniquely identify the user's target topic.
+- Preserve premises and hypotheticals (e.g., "만약", "~라면", 숫자/기간 조건). Do NOT drop them — premises belong in the rewrite.
+- Preserve ordinal and ranking signals (e.g., "2번째", "두 번째", "n번째", "가장", "최대/최소", "비싼/싼", "높은/낮은"). Keep them in the rewrite — do NOT resolve them to a specific row or candidate (e.g., do NOT turn "2번째로 비싼거" into "부모 상"). Picking the actual row is the downstream retriever's / answer LLM's job; the rewrite must stay a self-contained search query.
 
 Examples
 
@@ -27,3 +29,15 @@ Conversation:
 user: 퇴직금 계산식 알려줘
 Current question: 퇴직금 계산식 알려줘
 Rewrite: NOOP
+
+Conversation:
+user: 퇴직금 계산식 알려줘
+assistant: (퇴직금 계산식 설명…)
+Current question: 만약 5년 근무하면?
+Rewrite: 5년 근무 시 퇴직금 계산
+
+Conversation:
+user: 경조사 규정 알려줘
+assistant: (경조사 전체 표 설명…)
+Current question: 2번째로 비싼거
+Rewrite: 경조사 중 두 번째로 비싼 항목

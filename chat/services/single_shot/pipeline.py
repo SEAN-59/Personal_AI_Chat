@@ -67,8 +67,11 @@ def run_single_shot(
     if cached is not None:
         return cached
 
-    # 5) 프롬프트 조립
-    messages = build_single_shot_messages(question, chunk_hits, qa_hits, history)
+    # 5) 프롬프트 조립 — raw question 은 원문 그대로, rewriter 결과는 별도 신호로 전달.
+    #    builder 가 둘이 같으면 기존 출력 유지, 다르면 '대화 맥락 반영 질문' 으로 함께 렌더.
+    messages = build_single_shot_messages(
+        question, chunk_hits, qa_hits, history, search_query=search_query,
+    )
 
     # 6) OpenAI 호출
     reply, usage, model = run_chat_completion(messages)

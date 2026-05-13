@@ -102,6 +102,37 @@ class SingleShotPipelinePurposeTests(SimpleTestCase):
         self.assertEqual(purposes[0], tp.PURPOSE_QUERY_REWRITER)
         self.assertEqual(purposes[1], tp.PURPOSE_SINGLE_SHOT_ANSWER)
 
+    def test_rewriter_search_query_passed_to_prompt_builder(self):
+        """Phase 9-2 S1 fix — rewriter 결과 'rewritten' 이 build_single_shot_messages 에
+        keyword arg `search_query` 로 전달되어야 답변 LLM 이 후속 질문 의도를 본다."""
+        from chat.services.single_shot.pipeline import run_single_shot
+
+        with patch(
+            'chat.services.single_shot.pipeline.rewrite_query_with_history',
+            return_value=('rewritten', _UsageStub(), 'gpt-4o-mini'),
+        ), patch(
+            'chat.services.single_shot.pipeline.retrieve_documents', return_value=[],
+        ), patch(
+            'chat.services.single_shot.pipeline.find_canonical_qa', return_value=[],
+        ), patch(
+            'chat.services.single_shot.pipeline.resolve_cache_hit', return_value=None,
+        ), patch(
+            'chat.services.single_shot.pipeline.build_single_shot_messages',
+            return_value=[{'role': 'user', 'content': 'q'}],
+        ) as builder_mock, patch(
+            'chat.services.single_shot.pipeline.run_chat_completion',
+            return_value=('reply text', _UsageStub(), 'gpt-4o-mini'),
+        ), patch(
+            'chat.services.single_shot.pipeline.record_token_usage',
+        ):
+            run_single_shot('Q', history=[{'role': 'user', 'content': 'prev'}])
+
+        builder_mock.assert_called_once()
+        args, kwargs = builder_mock.call_args
+        # build_single_shot_messages(question, chunk_hits, qa_hits, history, *, search_query=...)
+        self.assertEqual(args[0], 'Q')
+        self.assertEqual(kwargs.get('search_query'), 'rewritten')
+
 
 # ---------------------------------------------------------------------------
 # workflow_node — rewriter (text-schema 게이트) + extractor

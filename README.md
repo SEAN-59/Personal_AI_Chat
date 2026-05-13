@@ -83,11 +83,12 @@ Django · PostgreSQL(pgvector) · OpenAI를 결합한 개인 문서 Q&A 챗봇�
 - `AgentSettings` / `AgentSettingsAudit` — agent 한도·kill switch 싱글톤 + 변경 이력.
 
 **서비스 레이어**
-- `single_shot/` — 자료 검색 → 프롬프트 조립 → LLM 호출 → 후처리의 단일 응답 경로. 후속 질문은 진입 시 `query_rewriter` 가 self-contained 검색어로 변환 (원본 질문은 LLM · ChatLog 에 그대로 유지).
+- `single_shot/` — 자료 검색 → 프롬프트 조립 → LLM 호출 → 후처리의 단일 응답 경로. 후속 질문은 진입 시 `query_rewriter` 가 self-contained 검색어로 변환 (원본 질문은 LLM · ChatLog 에 그대로 유지). v0.5.0 부터 가설/전제 (`만약`, 숫자/기간 조건) 는 rewrite 에 보존.
+- `llm_router` — v0.5.0 신규. 키워드로 잡히지 않는 의도(가설/메타-요청/대명사) 를 보조 LLM 으로 분류. route 만 반환하고 `workflow_key` 는 손대지 않음 — DB `RouterRule` 전담.
 - `workflows/` — 결정론적 계산 경로. 공통 helper(날짜·숫자·검증·결과 타입) + 도메인 workflow. 현재 `date_calculation` (날짜 차이) / `amount_calculation` (금액 합계·평균·차이) / `table_lookup` (표 셀 조회) 3종. 자연어 질문에서 `workflow_input_extractor` (regex 우선 + LLM fallback) 가 입력값을 자동 추출. `workflow_key` 미등록 / 입력 부족 등 실패는 single_shot 폴백.
 - `agent/` — ReAct loop 기반 multi-hop 경로. 등록된 도구 (자료 검색 / 공식 Q&A 조회 / workflow 호출) 를 반복 호출하며 비교형·다중 출처형 질문 처리. 검색 결과는 query 키워드 주변 윈도우로 추려 LLM 토큰을 절약하고, 무관 청크는 `[관련성 낮음]` 마커로 표시. 종료 정책 (반복 횟수 / 연속 실패 / 동일 호출 반복 / 누적 low-relevance 한도) 과 kill switch 는 BO `/bo/agent/` 에서 제어.
 - `graph/` — LangGraph 진입점. `run_chat_graph(question, history)` → router → `(single_shot / workflow / agent)`.
-- `question_router` — 질문을 세 경로 중 하나로 분류. **DB `RouterRule` 우선 조회 → 코드 키워드 fallback → `single_shot`**. BO `/bo/router-rules/` 에서 운영자가 CRUD.
+- `question_router` — 질문을 세 경로 중 하나로 분류. **4-tier**: (1) DB `RouterRule`, (2) `DATE_CONDITION_KEYWORDS` (지급일·만료일·정산일·마감일 → agent + calendar 도구, v0.4.2 회귀 보호), (3) `llm_router` (보조 LLM 분류, route 만 채움), (4) 코드 키워드 fallback (WORKFLOW/AGENT/`single_shot`). BO `/bo/router-rules/` 에서 운영자가 CRUD.
 - `prompt_loader` / `prompt_registry` — `assets/prompts/chat/` 외부 파일 로더 + BO 편집 허용 목록.
 - `qa_retriever` — CanonicalQA 벡터 검색 + ChatLog 저장 (중복 방지) + 승격 처리.
 - `reranker` — 하이브리드 검색 결과 top 10 을 LLM 이 다시 정렬해 top 5 채택.
@@ -231,6 +232,7 @@ pending → processing → reviewing → processing → ready
 
 사용자가 질문을 보내면 다음 순서로 처리됩니다.
 
+0. **라우팅** — `question_router` 가 4-tier (DB `RouterRule` → `DATE_CONDITION_KEYWORDS` → `llm_router` → 코드 키워드 fallback) 로 `single_shot / workflow / agent` 중 하나를 결정. `workflow_key` 는 DB rule 만 채우고, LLM 출력은 route 만 사용.
 1. **세션 히스토리 로드** — Django 세션에서 최근 대화 턴(최대 20개)을 가져와 맥락 유지.
 2. **자료 후보 검색** — 하이브리드 검색(벡터 + 키워드 + RRF)으로 DocumentChunk 상위 10개 후보 선정.
 3. **LLM 재정렬** — 후보 10개를 gpt-4o-mini가 관련성 기준으로 다시 순위. 상위 5개만 최종 채택.
@@ -447,3 +449,4 @@ DB는 Docker Compose가 자동으로 기동·연결하므로 **기본 사용엔 
 |2026.04.29| 0.4.0 Phase 8-6 — Agent Settings Expansion: Extra Limits & Audit Log<br>`AgentSettings` 에 `max_consecutive_failures` (1~10) / `max_repeated_call` (**2~10**) 두 필드 추가 — `react.py` 의 코드 상수 두 개를 `runtime_settings.DEFAULT_*` alias 로 변경, `_decide_termination` 시그니처 확장. `max_repeated_call=1` 은 첫 정상 tool call 직후 종료 충돌이라 min=2 강제 + help_text 에 호환/기록용 안내 명시 (8-3 즉시 차단 정책으로 실제 동작 변화 거의 없음 — 정책 통합은 후속 Phase). 신규 `AgentSettingsAudit` 모델 — `changed_at / changed_by FK SET_NULL / changes JSON / snapshot JSON`. `agent_view` POST 가 form 바인딩 전 DB 값을 `old_values` 별도 캡처 (ModelForm.is_valid() instance mutation 회피) 후 변경된 필드만 audit row 생성 (변경 0이면 미생성). BO `/bo/agent/` 페이지 하단에 `Settings 변경 이력` 섹션 (최근 10건). |[2026-04-29-phase8-6-agent-extra-limits-audit.md](resources/documents/2026-04-29-phase8-6-agent-extra-limits-audit.md)|
 |2026.04.29| 0.4.0 Phase 9 — 안정화 및 배포 준비<br>로드맵 §3 의 본 Phase 8 의도 (안정화 + 배포 준비) 가 실제 개발에선 'agent 운영화' 로 재정의되어, 별 milestone Phase 9 로 분리해 처리. 자동 회귀 가드 — 라우팅 e2e (`test_routing_e2e.py` 9 cases) + 파이프라인 smoke (`test_pipeline_smoke.py` 9 cases, 노드 자체 mock + `_compiled_graph.cache_clear()` 계약) + prompt registry 정합 (`PromptRegistryConsistencyTests` 1 case). 12 대표 질문셋 + 기대 라우트 / 응답 / sources / TokenUsage purpose 분포 정리. `assets/prompts/chat/` 8 파일 사용처 점검 (미사용 0건). `CHANGELOG.md` 신규 — 0.3.x → 0.4.0 user-facing / operator-facing 변화. 배포 체크리스트 (마이그레이션 0001~0015 / 환경변수 / 빌드 / 데이터 backfill / 롤백 / 모니터링). |[2026-04-29-phase9-stabilization.md](resources/documents/2026-04-29-phase9-stabilization.md)|
 |2026.05.13| v0.5.0 Phase 9-1 — LLM Router + 인프라<br>`llm_router` prompt / purpose / tests 추가, `route_question(question, history)` 확장, `run_chat_completion(model=None)` 지원. DATE_CONDITION 우선순위와 `지급 일` 공백 변이, agent tool alias(`text` → `query`) 회귀 보강. |[2026-05-13-v0-5-0-phase9-1-llm-router.md](resources/documents/2026-05-13-v0-5-0-phase9-1-llm-router.md)|
+|2026.05.13| v0.5.0 Phase 9-2 — Validation + #76 Premise 보존<br>`query_rewriter.md` 에 가설/전제 보존 규칙 + example 추가, `QueryRewriterPremiseTests` (prompt content guard + rewrite cleanup guard) 신설. README §3/§7 4-tier 라우터 반영. S1~S7 / R1·R2 수동 QA 통과. |[2026-05-13-v0-5-0-phase9-2-validation-polish.md](resources/documents/2026-05-13-v0-5-0-phase9-2-validation-polish.md)|

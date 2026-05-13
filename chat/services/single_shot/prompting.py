@@ -5,7 +5,7 @@
 확장 지점이 된다.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from chat.services.prompt_builder import build_messages
 from chat.services.qa_retriever import QAHit
@@ -17,6 +17,15 @@ def build_single_shot_messages(
     chunk_hits: List[ChunkHit],
     qa_hits: List[QAHit],
     history: List[Dict[str, Any]],
+    *,
+    search_query: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """OpenAI chat.completions 에 바로 넘길 messages 리스트를 돌려준다."""
-    return build_messages(question, chunk_hits, qa_hits, history)
+    """OpenAI chat.completions 에 바로 넘길 messages 리스트를 돌려준다.
+
+    `search_query` 는 `query_rewriter` 가 만든 self-contained 검색어. raw
+    `question` 과 다를 때만 user 메시지의 질문 섹션에 함께 렌더링되어 답변
+    LLM 이 후속 질문의 실제 의도를 보게 된다.
+    """
+    return build_messages(
+        question, chunk_hits, qa_hits, history, search_query=search_query,
+    )
