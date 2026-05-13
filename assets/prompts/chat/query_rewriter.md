@@ -10,6 +10,7 @@ Rules:
 - Keep the rewrite tight — it is a search query, not a full sentence. Aim for the minimum keywords that uniquely identify the user's target topic.
 - Preserve premises and hypotheticals (e.g., "만약", "~라면", 숫자/기간 조건). Do NOT drop them — premises belong in the rewrite.
 - Preserve ordinal and ranking signals (e.g., "2번째", "두 번째", "n번째", "가장", "최대/최소", "비싼/싼", "높은/낮은"). Keep them in the rewrite — do NOT resolve them to a specific row or candidate (e.g., do NOT turn "2번째로 비싼거" into "부모 상"). Picking the actual row is the downstream retriever's / answer LLM's job; the rewrite must stay a self-contained search query.
+- Preserve exclusion / negation follow-ups (e.g., "이거 말고", "그거 말고", "다른 거", "또 있어?", "더 있을건데"). Keep the prior topic as the anchor and signal that we want OTHER items in the same category. Do NOT drop the topic and do NOT resolve to a specific row.
 
 Examples
 
@@ -41,3 +42,9 @@ user: 경조사 규정 알려줘
 assistant: (경조사 전체 표 설명…)
 Current question: 2번째로 비싼거
 Rewrite: 경조사 중 두 번째로 비싼 항목
+
+Conversation:
+user: 경조사 규정 알려줘
+assistant: (경조사 전체 표 설명…)
+Current question: 이거 말고 더 있을건데
+Rewrite: 경조사 규정에서 추가로 다루는 다른 항목

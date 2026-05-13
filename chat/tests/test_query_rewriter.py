@@ -155,6 +155,72 @@ class QueryRewriterPremiseTests(TestCase):
         self.assertIn('Current question: 2번째로 비싼거', prompt_text)
         self.assertIn('Rewrite: 경조사 중 두 번째로 비싼 항목', prompt_text)
 
+    def test_query_rewriter_prompt_contains_exclusion_rule(self):
+        """v0.5.1 plan §3 — exclusion/negation follow-up 보존 가드."""
+        from chat.services.prompt_loader import load_prompt
+
+        prompt_text = load_prompt('chat/query_rewriter.md')
+        self.assertIn('exclusion', prompt_text.lower())
+        self.assertIn('이거 말고', prompt_text)
+        self.assertIn('더 있을건데', prompt_text)
+        # Example.
+        self.assertIn('Current question: 이거 말고 더 있을건데', prompt_text)
+
+    def test_exclusion_followup_preserves_topic_in_cleanup(self):
+        """v0.5.1 plan §3 — `이거 말고 더 있을건데` 가 직전 주제(경조사) 를 유지."""
+        history = [
+            {'role': 'user', 'content': '경조사 규정 알려줘'},
+            {'role': 'assistant', 'content': '본인 상 500만원, 배우자 상 100만원, 부모 상 50만원 ...'},
+        ]
+        usage_stub = _stub_completion('경조사 규정에서 추가로 다루는 다른 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=(
+                '경조사 규정에서 추가로 다루는 다른 항목', usage_stub, 'gpt-mini',
+            ),
+        ) as mocked:
+            result, usage, model = query_rewriter.rewrite_query_with_history(
+                '이거 말고 더 있을건데',
+                history=history,
+            )
+        mocked.assert_called_once()
+        self.assertEqual(result, '경조사 규정에서 추가로 다루는 다른 항목')
+        self.assertIs(usage, usage_stub)
+        self.assertEqual(model, 'gpt-mini')
+
+    def test_overlength_rewrite_falls_back_to_original(self):
+        """v0.5.1 plan §5 — `_MAX_REWRITE_LEN` 초과 시 원본 유지, usage 는 보존."""
+        history = [{'role': 'user', 'content': '이전 질문'}]
+        overlong = '경조사' * 200  # > 200 chars
+        usage_stub = _stub_completion(overlong)[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=(overlong, usage_stub, 'gpt-mini'),
+        ):
+            result, usage, model = query_rewriter.rewrite_query_with_history(
+                '비싼거',
+                history=history,
+            )
+        # 비정상 길이 → 원본 fallback. usage/model 은 호출이 일어났으므로 유지.
+        self.assertEqual(result, '비싼거')
+        self.assertIs(usage, usage_stub)
+        self.assertEqual(model, 'gpt-mini')
+
+    def test_generic_exception_falls_back_to_original_without_usage(self):
+        """v0.5.1 plan §5 — `_call_rewriter_llm` 의 비정형 예외도 흡수."""
+        history = [{'role': 'user', 'content': '이전 질문'}]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            side_effect=RuntimeError('boom'),
+        ):
+            result, usage, model = query_rewriter.rewrite_query_with_history(
+                '비싼거',
+                history=history,
+            )
+        self.assertEqual(result, '비싼거')
+        self.assertIsNone(usage)
+        self.assertIsNone(model)
+
     def test_rewrite_query_with_history_preserves_ordinal_in_cleanup(self):
         history = [
             {'role': 'user', 'content': '경조사 규정 알려줘'},
