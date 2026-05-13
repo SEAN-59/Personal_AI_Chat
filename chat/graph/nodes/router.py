@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def router_node(state: GraphState) -> dict:
     """state.question → RouteDecision → state.route/route_reason/matched_rules/workflow_key."""
-    decision = route_question(state['question'])
+    decision = route_question(state['question'], state.get('history', []))
 
     if decision.route != ROUTE_SINGLE_SHOT:
         logger.info(

@@ -2,13 +2,38 @@
 
 `route_question(<query>)` 직접 호출로 세 layer (DB RouterRule / 코드 키워드
 fallback / default) 모두 cover. workflow_key 매핑은 RouterRule fixture 명시.
+
+Phase 9-1: LLM Router tier 도입 후 `_llm_classify` 가 단발 single_shot/default
+케이스를 잡지 못하도록 call-site (`chat.services.question_router._llm_classify`)
+을 모듈 단위로 None 반환 mock. OPENAI_API_KEY 없이 오프라인 통과 보장.
 """
+
+from unittest.mock import patch
 
 from django.test import TestCase
 
 from chat.graph.routes import ROUTE_AGENT, ROUTE_SINGLE_SHOT, ROUTE_WORKFLOW
 from chat.models import RouterRule
 from chat.services.question_router import route_question
+
+
+def setUpModule():
+    """모듈 전역에서 `_llm_classify` call-site binding 을 None 반환으로 patch.
+
+    `question_router` 가 `from chat.services.llm_router import _llm_classify` 로
+    심볼을 자기 모듈 네임스페이스에 바인딩하기 때문에, Tier 3 가 실제로 호출하는
+    심볼은 `chat.services.question_router._llm_classify` — 이쪽을 patch 해야 네트워크 /
+    API key 없이 그린이 된다.
+    """
+    global _llm_patch
+    _llm_patch = patch(
+        'chat.services.question_router._llm_classify', return_value=None,
+    )
+    _llm_patch.start()
+
+
+def tearDownModule():
+    _llm_patch.stop()
 
 
 class SingleShotRoutingTests(TestCase):
@@ -147,3 +172,52 @@ class DateConditionRoutingTests(TestCase):
         decision = route_question('급여는 얼마야?')
         self.assertEqual(decision.route, ROUTE_WORKFLOW)
         self.assertEqual(decision.reason, 'workflow_keyword')
+
+    def test_spacing_급여_지급_일(self):
+        # `지급일` 의 띄어쓰기 변이 `지급 일` — DATE_CONDITION 이 WORKFLOW 보다 먼저.
+        # raw 매칭 실패해도 normalized 비교로 잡혀야 한다 (Phase 9-1 회귀 가드).
+        decision = route_question('급여 지급 일은 언제야')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+        # matched_rules 는 canonical 키워드 `지급일` 로 정규화되어 돌아와야 한다.
+        self.assertIn('지급일', decision.matched_rules)
+
+    def test_spacing_정산_일(self):
+        decision = route_question('정산 일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+        self.assertIn('정산일', decision.matched_rules)
+
+    def test_spacing_신청_마감_일(self):
+        decision = route_question('신청 마감 일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertEqual(decision.reason, 'date_condition_keyword')
+        self.assertIn('마감일', decision.matched_rules)
+
+
+class DbRuleSpacingTests(TestCase):
+    """DB RouterRule 의 contains 매칭이 띄어쓰기 변이도 잡는지 (Phase 9-1).
+
+    `지급일` 패턴이 들어간 agent rule 이 있으면 `급여 지급 일은 언제야` 같은
+    공백 변이 질문이 raw 매칭 실패 후 normalized fallback 으로 잡혀 Tier 1 에서
+    바로 agent 로 라우팅되어야 한다. 그래야 LLM/WORKFLOW 로 새지 않는다.
+    """
+
+    def setUp(self):
+        RouterRule.objects.create(
+            name='지급일 agent', route='agent', match_type='contains',
+            pattern='지급일', priority=100, enabled=True,
+        )
+
+    def test_db_rule_spacing_급여_지급_일(self):
+        decision = route_question('급여 지급 일은 언제야')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertTrue(decision.reason.startswith('db_rule:'))
+        self.assertIn('지급일', decision.matched_rules)
+
+    def test_db_rule_raw_급여_지급일(self):
+        # 공백 없는 기존 질문도 동일하게 DB rule 로 잡혀야 한다 (회귀 가드).
+        decision = route_question('급여 지급일은?')
+        self.assertEqual(decision.route, ROUTE_AGENT)
+        self.assertTrue(decision.reason.startswith('db_rule:'))
+        self.assertIn('지급일', decision.matched_rules)
