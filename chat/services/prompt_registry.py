@@ -71,6 +71,12 @@ PROMPT_REGISTRY: list[PromptEntry] = [
         description='generic agent 의 ReAct loop 가 매 step JSON 한 줄로 다음 action 또는 final_answer 를 결정하도록 지시. Phase 7-1.',
         relative_path='chat/agent_react.md',
     ),
+    PromptEntry(
+        key='chat-llm-router',
+        title='LLM 라우터 프롬프트',
+        description='사용자 질문을 single_shot / workflow / agent 중 하나로 분류하는 의도 분류기. JSON 한 줄로 route + reason 만 출력. Phase 9-1.',
+        relative_path='chat/llm_router.md',
+    ),
 ]
 
 # O(1) 조회용

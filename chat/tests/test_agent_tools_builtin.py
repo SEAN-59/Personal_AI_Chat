@@ -254,6 +254,32 @@ class RetrieveDocumentsEvidenceTests(SimpleTestCase):
         self.assertEqual(ref.url, '')
 
 
+class RetrieveDocumentsAliasTests(SimpleTestCase):
+    """Phase 9-1: `{'text': ...}` 로 호출해도 `query` 로 정규화돼 _retrieve 가 호출된다.
+
+    회귀 시나리오: `급여 지급일` 질문에서 LLM 이 retrieve_documents 를
+    `{'text': '급여 지급일'}` 로 부르고, schema 가 'text' 를 'query' 의 alias 로
+    선언하므로 schema_invalid 가 나지 않아야 한다.
+    """
+
+    def test_text_alias_routes_to_query_callable(self):
+        chunk = SimpleNamespace(
+            document_name='급여규정.pdf',
+            content='월 급여 지급일은 매월 25일',
+        )
+        with patch(
+            'chat.services.agent.tools_builtin._retrieve',
+            return_value=[chunk],
+        ) as mocked:
+            obs = tools.call('retrieve_documents', {'text': '급여 지급일'})
+        # canonical key 로 정규화돼 _retrieve 에 도달.
+        mocked.assert_called_once_with('급여 지급일')
+        # schema_invalid 회귀 차단.
+        self.assertNotEqual(obs.failure_kind, 'schema_invalid')
+        # Observation 은 LLM 이 시도한 raw args 그대로 보존.
+        self.assertEqual(dict(obs.arguments), {'text': '급여 지급일'})
+
+
 class FindCanonicalQAToolTests(SimpleTestCase):
     def test_delegates_to_qa_cache(self):
         hit = SimpleNamespace(

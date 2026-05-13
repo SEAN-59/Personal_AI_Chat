@@ -38,6 +38,9 @@ class PipelineSmokeBase(TestCase):
         self.addCleanup(_compiled_graph.cache_clear)
 
         # 세 노드 모두 stub 으로 patch — 어떤 노드가 호출되는지로 라우팅 검증.
+        # Phase 9-1: LLM Router 도입으로 S1~S3 single_shot 케이스가 Tier 3 진입.
+        # call-site binding (`chat.services.question_router._llm_classify`) 을
+        # None 반환으로 mock 해 OPENAI_API_KEY 없이도 Tier 4 키워드 fallback 으로 그린 유지.
         self._patches = [
             patch('chat.graph.app.single_shot_node',
                   side_effect=_stub_node('[single_shot stub]')),
@@ -45,9 +48,11 @@ class PipelineSmokeBase(TestCase):
                   side_effect=_stub_node('[workflow stub]')),
             patch('chat.graph.app.agent_node',
                   side_effect=_stub_node('[agent stub]')),
+            patch('chat.services.question_router._llm_classify',
+                  return_value=None),
         ]
         self.mocks = [p.start() for p in self._patches]
-        self.single_shot_mock, self.workflow_mock, self.agent_mock = self.mocks
+        self.single_shot_mock, self.workflow_mock, self.agent_mock = self.mocks[:3]
         for p in self._patches:
             self.addCleanup(p.stop)
         # patch 후 cache 비워 stub binding 으로 재컴파일.

@@ -8,22 +8,23 @@ from chat.services import token_purpose as tp
 class AllPurposesMembershipTests(SimpleTestCase):
     """`ALL_PURPOSES` 가 모든 known 상수를 포함."""
 
-    def test_known_six_purposes_are_members(self):
-        # known 6종: single_shot_answer / query_rewriter / workflow_extractor /
-        # workflow_table_lookup / agent_step / agent_final.
+    def test_known_seven_purposes_are_members(self):
+        # known 7종: single_shot_answer / query_rewriter / workflow_extractor /
+        # workflow_table_lookup / agent_step / agent_final / llm_router.
         self.assertIn(tp.PURPOSE_SINGLE_SHOT_ANSWER, tp.ALL_PURPOSES)
         self.assertIn(tp.PURPOSE_QUERY_REWRITER, tp.ALL_PURPOSES)
         self.assertIn(tp.PURPOSE_WORKFLOW_EXTRACTOR, tp.ALL_PURPOSES)
         self.assertIn(tp.PURPOSE_WORKFLOW_TABLE_LOOKUP, tp.ALL_PURPOSES)
         self.assertIn(tp.PURPOSE_AGENT_STEP, tp.ALL_PURPOSES)
         self.assertIn(tp.PURPOSE_AGENT_FINAL, tp.ALL_PURPOSES)
+        self.assertIn(tp.PURPOSE_LLM_ROUTER, tp.ALL_PURPOSES)
 
     def test_unknown_is_member(self):
         self.assertIn(tp.PURPOSE_UNKNOWN, tp.ALL_PURPOSES)
 
-    def test_total_count_is_seven(self):
-        # 6 known + 1 unknown.
-        self.assertEqual(len(tp.ALL_PURPOSES), 7)
+    def test_total_count_is_eight(self):
+        # 7 known + 1 unknown.
+        self.assertEqual(len(tp.ALL_PURPOSES), 8)
 
 
 class ValidatePurposeTests(SimpleTestCase):

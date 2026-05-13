@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Known purposes — Phase 8-2 진입 시점의 7 호출 사이트 매핑.
+# Phase 9-1 에서 LLM Router 1 개 추가 (known 7 + unknown 1).
 # ---------------------------------------------------------------------------
 
 # single_shot 답변 LLM (`chat/services/single_shot/pipeline.py:70`).
@@ -48,6 +49,9 @@ PURPOSE_AGENT_STEP = 'agent_step'
 # (`chat/services/agent/react.py:101`, action == 'final_answer' 인 step).
 PURPOSE_AGENT_FINAL = 'agent_final'
 
+# Phase 9-1: LLM Router 의 의도 분류 호출 (`chat/services/llm_router.py`).
+PURPOSE_LLM_ROUTER = 'llm_router'
+
 # 누락 / 외부 호출 / 마이그레이션 이전 row 의 default 분류.
 PURPOSE_UNKNOWN = 'unknown'
 
@@ -63,6 +67,7 @@ ALL_PURPOSES: FrozenSet[str] = frozenset({
     PURPOSE_WORKFLOW_TABLE_LOOKUP,
     PURPOSE_AGENT_STEP,
     PURPOSE_AGENT_FINAL,
+    PURPOSE_LLM_ROUTER,
     PURPOSE_UNKNOWN,
 })
 

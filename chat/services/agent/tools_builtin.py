@@ -504,7 +504,8 @@ register(Tool(
         'query 는 자유형 한국어/영어 검색어.'
     ),
     input_schema={
-        'query': FieldSpec(type='text', required=True, aliases=('query', '검색어')),
+        # Phase 9-1: LLM 이 `{'text': ...}` 로 호출하는 회귀 — `text` alias 추가.
+        'query': FieldSpec(type='text', required=True, aliases=('query', '검색어', 'text')),
     },
     callable=_retrieve_callable,
     summarize=_summarize_retrieve,
@@ -518,7 +519,8 @@ register(Tool(
         '같은 질문이 이미 답변된 적 있는지 확인할 때.'
     ),
     input_schema={
-        'query': FieldSpec(type='text', required=True, aliases=('query', '질문')),
+        # Phase 9-1: retrieve_documents 와 동일한 alias 정책으로 통일.
+        'query': FieldSpec(type='text', required=True, aliases=('query', '질문', 'text')),
     },
     callable=_qa_callable,
     summarize=_summarize_qa,

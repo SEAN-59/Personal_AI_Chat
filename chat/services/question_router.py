@@ -1,17 +1,20 @@
-"""질문 분류기 (Phase 4-2 / Phase 6-1 / v0.4.2 확장).
+"""질문 분류기 (Phase 4-2 / Phase 6-1 / v0.4.2 / Phase 9-1 확장).
 
 graph 의 router_node 가 부른다. 우선순위는:
 
     1. DB RouterRule 조회 (enabled=True, priority DESC) — 매치 있으면 해당 route
     2. 코드 상수 DATE_CONDITION_KEYWORDS (v0.4.2 — 조건절 적용이 필요한 날짜 질문)
        → agent (calendar 도구 활용)
-    3. 코드 상수 WORKFLOW_KEYWORDS → workflow
-    4. 코드 상수 AGENT_KEYWORDS → agent
+    3. LLM Router (`_llm_classify`) — 의도 분류, 예외/None 시 다음 tier 로 fallback
+    4. 코드 키워드 fallback:
+         - WORKFLOW_KEYWORDS → workflow
+         - AGENT_KEYWORDS → agent
     5. 그래도 없으면 'single_shot' (default)
 
 코드 상수는 **영구 보존되는 기본 동작**이다. DB rule 은 운영 중 조정하는
-override 계층. BO 에서 rule 을 다 지우거나 DB 가 비어있어도 코드 키워드로
-Phase 4-1 동작 그대로 유지된다.
+override 계층, LLM Router 는 키워드로 잡히지 않는 의도를 메우는 중간 계층.
+BO 에서 rule 을 다 지우고 LLM 호출이 실패해도 코드 키워드로 Phase 4-1 동작
+그대로 유지된다.
 
 workflow 가 agent 보다 먼저인 이유: 정형 계산은 저렴·안정적이므로 애매할 때
 workflow 쪽이 안전. agent 는 탐색·비교가 명확할 때만 사용.
@@ -33,9 +36,10 @@ Phase 6-1 의 역할 정리:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from chat.graph.routes import ROUTE_AGENT, ROUTE_SINGLE_SHOT, ROUTE_WORKFLOW
+from chat.services.llm_router import LlmRouteResult, _llm_classify
 
 
 # 조건절 적용이 필요한 날짜 질문 신호 (v0.4.2, 이슈 #73).
@@ -70,6 +74,8 @@ class RouteDecision:
     reason 포맷:
       - 'db_rule:<name>'         — DB RouterRule 매치
       - 'date_condition_keyword' — 코드 DATE_CONDITION_KEYWORDS 매치 (v0.4.2)
+      - 'llm:<짧은 근거>'        — LLM Router 분류 결과 (Phase 9-1)
+      - 'llm'                    — LLM Router 분류 결과인데 근거가 비어있을 때
       - 'workflow_keyword'       — 코드 WORKFLOW_KEYWORDS 매치
       - 'agent_keyword'          — 코드 AGENT_KEYWORDS 매치
       - 'default'                — 아무것도 매치 안 됨
@@ -85,18 +91,36 @@ class RouteDecision:
     workflow_key: str = ''
 
 
+def _strip_ws(text: str) -> str:
+    """매칭 전용 공백 제거 — downstream 으로 내려가는 question 은 건드리지 않는다.
+
+    Why: 사용자 입력은 띄어쓰기 변이가 잦다 (`지급일` vs `지급 일`). 정규화는
+    매칭 단계에서만 적용하고, route_question 이 받은 raw question 은 그대로 둔다.
+    """
+    return ''.join(text.split())
+
+
 def _match_db_rules(question: str) -> Optional[RouteDecision]:
     """DB RouterRule 을 priority 순으로 순회해 첫 매치 반환. 없으면 None.
 
     lazy import 로 Django app 로딩 순서와 무관하게 동작.
-    현재는 match_type='contains' 만 지원.
+    현재는 match_type='contains' 만 지원. raw 매칭이 우선이고, 실패 시 공백을
+    제거한 normalized 비교로 한 번 더 시도 — `지급일` 패턴이 `지급 일` 변이도
+    잡도록.
     """
     from chat.models import RouterRule  # lazy to avoid app-registry issues
 
+    normalized_question = _strip_ws(question)
     # Meta.ordering 이 (-priority, -updated_at) 이라 별도 order_by 불필요.
     for rule in RouterRule.objects.filter(enabled=True):
         if rule.match_type == RouterRule.MatchType.CONTAINS:
-            if rule.pattern and rule.pattern in question:
+            if not rule.pattern:
+                continue
+            normalized_pattern = _strip_ws(rule.pattern)
+            matched = rule.pattern in question or (
+                normalized_pattern and normalized_pattern in normalized_question
+            )
+            if matched:
                 # workflow_key 는 route == 'workflow' 일 때만 의미가 있다 —
                 # 다른 route 의 rule 이 workflow_key 를 들고 있어도 무시.
                 workflow_key = (
@@ -113,24 +137,67 @@ def _match_db_rules(question: str) -> Optional[RouteDecision]:
 
 
 def _matches(question: str, keywords: tuple[str, ...]) -> List[str]:
-    """question 안에 포함된 모든 키워드를 순서대로 반환. 없으면 빈 리스트."""
-    return [kw for kw in keywords if kw in question]
+    """question 안에 포함된 모든 키워드를 순서대로 반환. 없으면 빈 리스트.
+
+    띄어쓰기 변이 (`지급 일`) 도 같은 키워드 `지급일` 로 잡히도록 공백을 제거한
+    normalized 비교를 fallback 으로 추가. 반환되는 키워드는 항상 keywords 원본
+    (canonical) 문자열 — 호출자가 매칭된 키워드 이름을 안정적으로 쓸 수 있게.
+    """
+    normalized_question = _strip_ws(question)
+    out: List[str] = []
+    for kw in keywords:
+        if kw in question:
+            out.append(kw)
+            continue
+        normalized_kw = _strip_ws(kw)
+        if normalized_kw and normalized_kw in normalized_question:
+            out.append(kw)
+    return out
 
 
-def route_question(question: str) -> RouteDecision:
-    """질문을 3 route 중 하나로 분류 (DB → 코드 fallback → default 순)."""
+def route_question(
+    question: str,
+    history: Optional[List[Dict]] = None,
+) -> RouteDecision:
+    """질문을 3 route 중 하나로 분류 (4-tier).
+
+    평가 순서 (엄수):
+      Tier 1: DB RouterRule — 매치 시 즉시 반환, LLM 호출 0.
+      Tier 2: DATE_CONDITION_KEYWORDS (v0.4.2 / #73) — 매치 시 agent 즉시 반환, LLM 호출 0.
+      Tier 3: LLM Router (`_llm_classify`) — 예외/None 시 Tier 4 로 fallback.
+      Tier 4: 코드 키워드 fallback (WORKFLOW / AGENT / default).
+
+    `history=None` 디폴트로 기존 `route_question(q)` 호출 호환.
+    LLM 출력의 workflow_key 는 항상 무시 — workflow_key 는 DB RouterRule 전담.
+    """
+    history = history or []
+
     db_decision = _match_db_rules(question)
     if db_decision is not None:
         return db_decision
 
-    # v0.4.2: DATE_CONDITION 을 WORKFLOW 보다 먼저 평가 — 합성 질문 (`급여 지급일`)
-    # 이 WORKFLOW `급여` 에 가로채지지 않게.
+    # v0.4.2: DATE_CONDITION 을 LLM / WORKFLOW 보다 먼저 평가 — 합성 질문 (`급여 지급일`)
+    # 이 WORKFLOW `급여` 에 가로채지지 않게. LLM 도 이 보호 위로 올리지 않는다 (#73 회귀 가드).
     hits = _matches(question, DATE_CONDITION_KEYWORDS)
     if hits:
         return RouteDecision(
             route=ROUTE_AGENT,
             reason='date_condition_keyword',
             matched_rules=hits,
+        )
+
+    # Tier 3: LLM 라우터. workflow_key 는 LLM 출력에 있어도 항상 무시.
+    # `_llm_classify` 내부에서 예외를 흡수해 None 을 돌려주지만, 방어적으로 한 번 더
+    # try/except 로 감싼다 (호출자가 다른 mock 으로 갈아끼웠을 때도 회귀 0).
+    try:
+        llm_result: Optional[LlmRouteResult] = _llm_classify(question, history)
+    except Exception:  # noqa: BLE001 — LLM 단의 예외는 키워드 fallback 으로 흡수
+        llm_result = None
+    if llm_result is not None:
+        return RouteDecision(
+            route=llm_result.route,
+            reason=llm_result.reason,
+            workflow_key='',
         )
 
     hits = _matches(question, WORKFLOW_KEYWORDS)
