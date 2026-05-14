@@ -124,6 +124,18 @@
   <div class="alert alert-danger">⚠ {{ warning }}</div>
 {% endfor %}
 
+{% if doc.error_message %}
+  <div class="alert alert-danger" role="alert">
+    <strong>마지막 임베딩 오류:</strong> {{ doc.error_message }}
+  </div>
+{% endif %}
+
+{% if doc.status == 'ready' %}
+  <div class="alert alert-success" role="alert">
+    이 문서는 이미 검색 가능한 상태입니다. 텍스트를 수정하고 제출하면 기존 청크를 교체하여 재임베딩합니다.
+  </div>
+{% endif %}
+
 <div class="review-grid">
   <!-- 좌측: 파일 정보 + 통계 -->
   <aside>
@@ -189,12 +201,15 @@
       </div>
     </section>
 
-    <!-- 취소(삭제) 버튼 -->
-    <form method="post" action="{% url 'bo:delete' doc.pk %}"
-          onsubmit="return confirm('업로드를 취소하고 파일을 삭제하시겠습니까?');">
-      {% csrf_token %}
-      <button type="submit" class="btn btn-danger" style="width: 100%;">취소 및 삭제</button>
-    </form>
+    {% if doc.status == 'ready' %}
+      <a href="{% url 'bo:files' %}" class="btn" style="width: 100%; text-align: center; display: block;">← 목록으로</a>
+    {% else %}
+      <form method="post" action="{% url 'bo:delete' doc.pk %}"
+            onsubmit="return confirm('업로드를 취소하고 파일을 삭제하시겠습니까?');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger" style="width: 100%;">취소 및 삭제</button>
+      </form>
+    {% endif %}
   </aside>
 
   <!-- 우측: 텍스트 편집기 -->
@@ -203,11 +218,12 @@
     <p class="page-description" style="margin-bottom: var(--space-4);">
       표·레이아웃 문제 등으로 잘못 추출된 부분이 있으면 직접 수정하세요. 수정한 내용으로 임베딩됩니다.
     </p>
-    <form method="post" action="{% url 'bo:confirm' doc.pk %}">
+    <form method="post" action="{% url 'bo:confirm' doc.pk %}"
+          {% if doc.status == 'ready' %}onsubmit="return confirm('이미 검색 가능한 문서입니다. 수정을 진행하면 임베딩을 새롭게 실행합니다. 계속하시겠습니까?');"{% endif %}>
       {% csrf_token %}
       <textarea name="edited_text" class="review-textarea" id="editor" required>{{ text }}</textarea>
       <div class="review-actions">
-        <button type="submit" class="btn btn-primary">임베딩 진행</button>
+        <button type="submit" class="btn btn-primary">{% if doc.status == 'ready' %}재임베딩 진행{% else %}임베딩 진행{% endif %}</button>
       </div>
     </form>
   </section>

@@ -72,8 +72,13 @@
               </td>
               <td>{{ doc.uploaded_at|date:"Y-m-d H:i" }}</td>
               <td>
-                {% if doc.status == 'reviewing' or doc.status == 'failed' %}
-                  <a href="{% url 'bo:review' doc.pk %}" class="btn btn-sm">검토</a>
+                {% if doc.status == 'ready' %}
+                  <a href="{% url 'bo:chunks' doc.pk %}" class="btn btn-sm btn-secondary">청크 확인</a>
+                {% endif %}
+                {% if doc.status == 'reviewing' or doc.status == 'failed' or doc.status == 'ready' %}
+                  <a href="{% url 'bo:review' doc.pk %}" class="btn btn-sm">
+                    {% if doc.status == 'ready' %}수정{% else %}검토{% endif %}
+                  </a>
                 {% endif %}
                 <form method="post" action="{% url 'bo:delete' doc.pk %}" style="display: inline;" onsubmit="return confirm('정말 삭제하시겠습니까?');">
                   {% csrf_token %}

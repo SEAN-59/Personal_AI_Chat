@@ -88,3 +88,41 @@ class InputNormalizerServiceTests(TestCase):
         result = normalize('  RUDWHTK  ')
         self.assertEqual(result.raw, '  RUDWHTK  ')
         self.assertEqual(result.normalized, '경조사')
+
+    # --- self-expansion guard (v0.5.3 QA 보강) ---
+
+    def test_contains_does_not_expand_already_canonical_replacement(self):
+        # 경조사 입력 → contains(경조→경조사) 적용 시 경조사사 가 되어선 안 됨.
+        self._mk('경조', '경조사', match_type='contains')
+        result = normalize('경조사')
+        self.assertFalse(result.changed, '이미 경조사가 포함된 입력은 바꾸지 않아야 함')
+        self.assertEqual(result.normalized, '경조사')
+
+    def test_contains_does_not_expand_phrase_already_containing_replacement(self):
+        # 경조사 알려줘 → 경조사사 알려줘 가 되어선 안 됨.
+        self._mk('경조', '경조사', match_type='contains')
+        result = normalize('경조사 알려줘')
+        self.assertFalse(result.changed)
+        self.assertEqual(result.normalized, '경조사 알려줘')
+
+    def test_contains_still_expands_shorthand_not_yet_canonical(self):
+        # 경조 한도 → 경조사 한도 (replacement 가 아직 입력에 없으므로 정상 치환).
+        self._mk('경조', '경조사', match_type='contains')
+        result = normalize('경조 한도')
+        self.assertTrue(result.changed)
+        self.assertEqual(result.normalized, '경조사 한도')
+
+    def test_contains_expands_shorthand_alongside_canonical(self):
+        # 경조사와 경조 한도 → 경조사와 경조사 한도
+        # 앞쪽 '경조사' 는 canonical 이므로 건너뛰고, 뒤쪽 '경조' 만 치환.
+        self._mk('경조', '경조사', match_type='contains')
+        result = normalize('경조사와 경조 한도')
+        self.assertTrue(result.changed)
+        self.assertEqual(result.normalized, '경조사와 경조사 한도')
+
+    def test_exact_rule_spacing_fix(self):
+        # BO 규칙으로 띄어쓰기 교정: 조부모상 → 조부모 상 (exact).
+        self._mk('조부모상', '조부모 상', match_type='exact')
+        result = normalize('조부모상')
+        self.assertTrue(result.changed)
+        self.assertEqual(result.normalized, '조부모 상')

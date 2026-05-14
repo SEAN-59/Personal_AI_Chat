@@ -1,9 +1,12 @@
 """BO 뷰 단위 테스트."""
 
+from unittest.mock import patch
+
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from chat.models import AgentSettings
+from files.models import Document, DocumentChunk
 
 
 # WhiteNoise 의 Manifest staticfiles 가 테스트 환경에선 collectstatic 안 된
@@ -520,3 +523,271 @@ class InputNormalizationViewTests(TestCase):
         response = self.client.post(url)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(InputNormalizationRule.objects.count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# v0.5.3 — BO 파일관리 READY 수정 + 재임베딩 + 청크 확인
+# ---------------------------------------------------------------------------
+
+def _make_doc(status=Document.Status.READY, edited_text='OLD TEXT', **kwargs):
+    """테스트용 Document 헬퍼 (실제 파일 생성 없이 문자열 경로 사용)."""
+    return Document.objects.create(
+        file='origin/test.txt',
+        original_name='test.txt',
+        size_bytes=11,
+        mime_type='text/plain',
+        status=status,
+        edited_text=edited_text,
+        **kwargs,
+    )
+
+
+def _make_chunks(doc, count=3):
+    """테스트용 DocumentChunk 헬퍼."""
+    return [
+        DocumentChunk.objects.create(
+            document=doc,
+            chunk_index=i,
+            content=f'chunk {i}',
+            embedding=[0.0] * 1536,
+        )
+        for i in range(count)
+    ]
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class FileListButtonTests(TestCase):
+    """§9.1.1 — 파일 목록 버튼 노출 및 순서."""
+
+    def _get_row_html(self, doc):
+        response = self.client.get(reverse('bo:files'))
+        content = response.content.decode()
+        row_start = content.find(f'bo/files/{doc.pk}/')
+        row_end = content.find('</tr>', row_start)
+        return content[row_start:row_end]
+
+    def test_ready_doc_shows_three_buttons_in_order(self):
+        doc = _make_doc(status=Document.Status.READY)
+        row = self._get_row_html(doc)
+        chunk_pos = row.find('청크 확인')
+        edit_pos = row.find('수정')
+        delete_pos = row.find('삭제')
+        self.assertGreater(chunk_pos, -1, '청크 확인 버튼 없음')
+        self.assertGreater(edit_pos, -1, '수정 버튼 없음')
+        self.assertGreater(delete_pos, -1, '삭제 버튼 없음')
+        self.assertLess(chunk_pos, edit_pos)
+        self.assertLess(edit_pos, delete_pos)
+
+    def test_reviewing_doc_has_no_chunk_button(self):
+        doc = _make_doc(status=Document.Status.REVIEWING)
+        row = self._get_row_html(doc)
+        self.assertEqual(row.find('청크 확인'), -1)
+        self.assertGreater(row.find('검토'), -1)
+
+    def test_failed_doc_has_no_chunk_button(self):
+        doc = _make_doc(status=Document.Status.FAILED)
+        row = self._get_row_html(doc)
+        self.assertEqual(row.find('청크 확인'), -1)
+        self.assertGreater(row.find('검토'), -1)
+
+    def test_pending_doc_has_no_chunk_or_edit_button(self):
+        doc = _make_doc(status=Document.Status.PENDING)
+        row = self._get_row_html(doc)
+        self.assertEqual(row.find('청크 확인'), -1)
+        self.assertEqual(row.find('수정'), -1)
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ReadyDocReviewPageTests(TestCase):
+    """§9.1.2 — READY 문서 review 진입."""
+
+    def test_ready_doc_review_returns_200(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_ready_doc_review_shows_banner(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertContains(response, '이미 검색 가능한 상태')
+
+    def test_ready_doc_review_shows_reembed_button(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertContains(response, '재임베딩 진행')
+
+    def test_ready_doc_review_has_confirm_onsubmit(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertContains(response, '이미 검색 가능한 문서입니다')
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ReembedSuccessTests(TestCase):
+    """§9.1.3 — READY 재임베딩 성공 시 old chunks 교체."""
+
+    def test_reembed_success_replaces_chunks(self):
+        doc = _make_doc(status=Document.Status.READY, edited_text='OLD TEXT')
+        _make_chunks(doc, count=3)
+
+        new_vectors = [[0.1] * 1536, [0.2] * 1536]
+        with patch('files.services.pipeline.embed_texts', return_value=new_vectors), \
+             patch('files.services.pipeline.chunk_text', return_value=['chunk A', 'chunk B']):
+            response = self.client.post(
+                reverse('bo:confirm', args=[doc.pk]),
+                {'edited_text': 'NEW TEXT'},
+            )
+
+        self.assertRedirects(response, reverse('bo:files'))
+        doc.refresh_from_db()
+        self.assertEqual(doc.edited_text, 'NEW TEXT')
+        self.assertEqual(doc.status, Document.Status.READY)
+        self.assertEqual(doc.error_message, '')
+        chunks = list(DocumentChunk.objects.filter(document=doc).order_by('chunk_index'))
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0].chunk_index, 0)
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ReembedFailureTests(TestCase):
+    """§9.1.4 — READY 재임베딩 실패 시 기존 상태 보존."""
+
+    def test_reembed_failure_preserves_status_and_chunks(self):
+        from files.services.embedder import EmbeddingError
+        doc = _make_doc(status=Document.Status.READY, edited_text='OLD TEXT')
+        _make_chunks(doc, count=3)
+
+        with patch('files.services.pipeline.embed_texts', side_effect=EmbeddingError('API 오류')), \
+             patch('files.services.pipeline.chunk_text', return_value=['chunk A', 'chunk B']):
+            response = self.client.post(
+                reverse('bo:confirm', args=[doc.pk]),
+                {'edited_text': 'NEW TEXT'},
+            )
+
+        self.assertRedirects(response, reverse('bo:review', args=[doc.pk]))
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.Status.READY)
+        self.assertEqual(doc.edited_text, 'OLD TEXT')
+        self.assertEqual(DocumentChunk.objects.filter(document=doc).count(), 3)
+        self.assertNotEqual(doc.error_message, '')
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ChunksPageTests(TestCase):
+    """§9.1.5 — 청크 확인 페이지 read-only / 순서."""
+
+    def test_chunks_page_returns_200(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:chunks', args=[doc.pk]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_chunks_page_has_no_form_post_or_inputs(self):
+        doc = _make_doc(status=Document.Status.READY)
+        _make_chunks(doc, count=2)
+        response = self.client.get(reverse('bo:chunks', args=[doc.pk]))
+        content = response.content.decode()
+        self.assertNotIn('<form method="post"', content.lower().replace('method="post"', 'method="post"'))
+        self.assertNotIn('<textarea', content)
+        self.assertNotIn('<input', content)
+
+    def test_chunks_page_orders_by_chunk_index(self):
+        doc = _make_doc(status=Document.Status.READY)
+        DocumentChunk.objects.create(document=doc, chunk_index=2, content='C', embedding=[0.0]*1536)
+        DocumentChunk.objects.create(document=doc, chunk_index=0, content='A', embedding=[0.0]*1536)
+        DocumentChunk.objects.create(document=doc, chunk_index=1, content='B', embedding=[0.0]*1536)
+        response = self.client.get(reverse('bo:chunks', args=[doc.pk]))
+        content = response.content.decode()
+        pos0 = content.find('#0')
+        pos1 = content.find('#1')
+        pos2 = content.find('#2')
+        self.assertLess(pos0, pos1)
+        self.assertLess(pos1, pos2)
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ReviewingConfirmRegressionTests(TestCase):
+    """§9.1.6 — 기존 REVIEWING 검토 흐름 회귀."""
+
+    def test_reviewing_confirm_uses_finalize_not_reembed(self):
+        doc = _make_doc(status=Document.Status.REVIEWING, edited_text='')
+
+        with patch('bo.views.files.reembed_document') as mock_reembed, \
+             patch('bo.views.files.finalize_document', return_value=2) as mock_finalize:
+            self.client.post(
+                reverse('bo:confirm', args=[doc.pk]),
+                {'edited_text': 'SOME TEXT'},
+            )
+
+        mock_finalize.assert_called_once()
+        mock_reembed.assert_not_called()
+
+    def test_failed_confirm_uses_finalize_not_reembed(self):
+        doc = _make_doc(status=Document.Status.FAILED, edited_text='')
+
+        with patch('bo.views.files.reembed_document') as mock_reembed, \
+             patch('bo.views.files.finalize_document', return_value=1) as mock_finalize:
+            self.client.post(
+                reverse('bo:confirm', args=[doc.pk]),
+                {'edited_text': 'SOME TEXT'},
+            )
+
+        mock_finalize.assert_called_once()
+        mock_reembed.assert_not_called()
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ReadyReviewCancelButtonTests(TestCase):
+    """§9.1.7 — READY review 페이지에서 취소 및 삭제 문구 부재."""
+
+    def test_ready_review_has_no_cancel_delete_text(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertNotContains(response, '취소 및 삭제')
+        self.assertNotContains(response, '업로드를 취소')
+
+    def test_ready_review_has_back_to_list_link(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertContains(response, '목록으로')
+
+    def test_reviewing_review_keeps_cancel_button(self):
+        doc = _make_doc(status=Document.Status.REVIEWING)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertContains(response, '취소 및 삭제')
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ChunksSidebarActiveTests(TestCase):
+    """§9.1.8 — 청크 확인 페이지 사이드바 파일관리 active."""
+
+    def test_chunks_page_sidebar_files_active(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:chunks', args=[doc.pk]))
+        content = response.content.decode()
+        # 파일관리 사이드바 링크에 active 클래스가 있는지 확인
+        import re
+        match = re.search(r'href="/bo/files/"[^>]*class="([^"]*)"', content)
+        self.assertIsNotNone(match, '파일관리 링크를 찾을 수 없음')
+        self.assertIn('active', match.group(1))
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ChunksRelatedNameTests(TestCase):
+    """§9.1.9 — doc.chunks related_name 회귀."""
+
+    def test_doc_chunks_related_name_works(self):
+        doc = _make_doc(status=Document.Status.READY)
+        DocumentChunk.objects.create(document=doc, chunk_index=0, content='test', embedding=[0.0]*1536)
+        self.assertEqual(doc.chunks.count(), 1)
+
+    def test_doc_chunks_order_by(self):
+        doc = _make_doc(status=Document.Status.READY)
+        DocumentChunk.objects.create(document=doc, chunk_index=1, content='B', embedding=[0.0]*1536)
+        DocumentChunk.objects.create(document=doc, chunk_index=0, content='A', embedding=[0.0]*1536)
+        ordered = list(doc.chunks.order_by('chunk_index').values_list('chunk_index', flat=True))
+        self.assertEqual(ordered, [0, 1])
+
+    def test_documentchunk_set_does_not_exist(self):
+        doc = _make_doc(status=Document.Status.READY)
+        with self.assertRaises(AttributeError):
+            _ = doc.documentchunk_set

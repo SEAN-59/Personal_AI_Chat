@@ -7,13 +7,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from chat.models import CanonicalQA, ChatLog
-from files.models import Document
 from files.services.chunker import count_tokens
 from files.services.embedder import EMBEDDING_MODEL
+from files.models import Document, DocumentChunk
 from files.services.pipeline import (
     PipelineError,
     extract_document,
     finalize_document,
+    reembed_document,
 )
 
 
@@ -125,7 +126,11 @@ def review(request, pk):
 
 @require_POST
 def confirm(request, pk):
-    """사용자가 편집한 텍스트로 임베딩을 확정 실행."""
+    """사용자가 편집한 텍스트로 임베딩을 확정 실행.
+
+    READY 문서 → reembed_document (실패 시 READY 유지)
+    그 외 → finalize_document (기존 경로)
+    """
     doc = get_object_or_404(Document, pk=pk)
 
     edited = (request.POST.get('edited_text') or '').strip()
@@ -133,19 +138,31 @@ def confirm(request, pk):
         messages.error(request, '편집된 텍스트가 비어있습니다.')
         return redirect('bo:review', pk=pk)
 
-    # 편집본 저장
-    doc.edited_text = edited
-    doc.save(update_fields=['edited_text'])
-
-    # 임베딩 파이프라인 실행
     try:
-        chunk_count = finalize_document(doc)
+        if doc.status == Document.Status.READY:
+            chunk_count = reembed_document(doc, edited)
+        else:
+            doc.edited_text = edited
+            doc.save(update_fields=['edited_text'])
+            chunk_count = finalize_document(doc)
     except PipelineError as e:
         messages.error(request, f'임베딩 실패: {e}')
         return redirect('bo:review', pk=pk)
 
     messages.success(request, f'"{doc.original_name}" 처리 완료 (청크 {chunk_count}개)')
     return redirect('bo:files')
+
+
+def chunks(request, pk):
+    """저장된 DocumentChunk 를 chunk_index 순으로 read-only 표시."""
+    doc = get_object_or_404(Document, pk=pk)
+    chunk_list = doc.chunks.order_by('chunk_index')
+    context = {
+        'doc': doc,
+        'chunks': chunk_list,
+        'total': chunk_list.count(),
+    }
+    return render(request, 'bo/files_chunks.html', context)
 
 
 @require_POST

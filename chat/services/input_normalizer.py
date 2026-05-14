@@ -81,14 +81,45 @@ def normalize(question: str) -> NormalizationResult:
             continue
         if not (rule.replacement or '').strip():
             continue
-        if rule.pattern and rule.pattern in q_canon:
-            normalized = q_canon.replace(rule.pattern, rule.replacement, 1)
-            return NormalizationResult(
-                raw=raw,
-                normalized=normalized,
-                applied=[_to_applied(rule)],
-                changed=True,
+        if not (rule.pattern and rule.pattern in q_canon):
+            continue
+
+        replacement_canon = canonicalize(rule.replacement)
+
+        if rule.pattern in replacement_canon:
+            # self-expansion guard: pattern 이 canonical replacement 의 일부인 규칙
+            # (예: 경조→경조사). 각 occurrence 를 검사해서 이미 canonical replacement 의
+            # 시작 위치인 경우에만 건너뛰고, 그렇지 않은 첫 번째 위치에서만 치환.
+            pat_len = len(rule.pattern)
+            rep_len = len(replacement_canon)
+            start = 0
+            eligible_pos = None
+            while True:
+                pos = q_canon.find(rule.pattern, start)
+                if pos == -1:
+                    break
+                if q_canon[pos:pos + rep_len] == replacement_canon:
+                    # 이 위치는 이미 canonical replacement 의 시작 — 건너뜀.
+                    start = pos + pat_len
+                    continue
+                eligible_pos = pos
+                break
+            if eligible_pos is None:
+                continue
+            normalized = (
+                q_canon[:eligible_pos]
+                + rule.replacement
+                + q_canon[eligible_pos + pat_len:]
             )
+        else:
+            normalized = q_canon.replace(rule.pattern, rule.replacement, 1)
+
+        return NormalizationResult(
+            raw=raw,
+            normalized=normalized,
+            applied=[_to_applied(rule)],
+            changed=True,
+        )
 
     return NormalizationResult(raw=raw, normalized=raw)
 
