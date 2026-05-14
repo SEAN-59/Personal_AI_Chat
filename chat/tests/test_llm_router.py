@@ -341,6 +341,30 @@ class DateConditionPriorityTests(TestCase):
                 self.assertEqual(decision.reason, 'date_condition_keyword')
                 self.assertEqual(llm_mock.call_count, 0)
 
+    def test_date_condition_5_fragile_cases_skip_llm_call(self):
+        """v0.5.1 §3 — DATE_CONDITION 5 case 가 `_llm_classify` 를 0회 호출.
+
+        plan §3 / §10 DoD: 9개 fragile case 중 DATE_CONDITION 5건은 LLM Router
+        를 건너뛰어야 한다 (Tier 2 우선순위 보장).
+        """
+        fragile_date_cases = [
+            '급여 지급일은?',
+            '지급 일',
+            '정산일',
+            '만료일',
+            '마감일',
+        ]
+        for question in fragile_date_cases:
+            with self.subTest(question=question):
+                llm_mock = MagicMock(return_value=None)
+                with patch(
+                    'chat.services.question_router._llm_classify', llm_mock,
+                ):
+                    decision = route_question(question, [])
+                self.assertEqual(decision.route, ROUTE_AGENT)
+                self.assertEqual(decision.reason, 'date_condition_keyword')
+                self.assertEqual(llm_mock.call_count, 0)
+
     def test_db_rule_still_overrides_date_condition(self):
         # DB rule 이 있으면 Tier 1 이 Tier 2 보다 먼저 — 회귀 보호가 DB override 를 막지 않음.
         RouterRule.objects.create(
@@ -356,3 +380,91 @@ class DateConditionPriorityTests(TestCase):
         self.assertEqual(decision.route, ROUTE_WORKFLOW)
         self.assertEqual(decision.workflow_key, 'date_calculation')
         self.assertEqual(llm_mock.call_count, 0)
+
+
+# ---------------------------------------------------------------------------
+# §6.8 v0.5.1 — LLM Router prompt content guard
+# ---------------------------------------------------------------------------
+
+class LlmRouterPromptContentTests(SimpleTestCase):
+    """`assets/prompts/chat/llm_router.md` 가 follow-up vs agent 분리 가이드를
+    유지하는지 silent regression 차단 (plan §3 / §9).
+    """
+
+    def setUp(self):
+        from chat.services.prompt_loader import load_prompt
+        self.prompt_text = load_prompt('chat/llm_router.md')
+
+    def test_prompt_lists_three_routes(self):
+        for route in ('single_shot', 'workflow', 'agent'):
+            self.assertIn(route, self.prompt_text)
+
+    def test_prompt_has_followup_to_single_shot_rule(self):
+        # 후속 비교·순위·지시어·가정형 fragment 는 single_shot 으로 가야 한다.
+        self.assertIn('follow-up', self.prompt_text)
+        self.assertIn('single_shot', self.prompt_text)
+        self.assertIn('비싼거', self.prompt_text)
+        self.assertIn('2번째로 비싼거', self.prompt_text)
+        self.assertIn('이거 말고 더 있을건데', self.prompt_text)
+        self.assertIn('만약 5년 근무하면?', self.prompt_text)
+
+    def test_prompt_restricts_agent_to_cross_doc_or_tools(self):
+        # agent 정의는 '서로 다른 규정/문서' 또는 '도구/외부 조회' 로 좁혀져 있어야 한다.
+        # 같은 문서 안의 단순 비교 fragment 가 agent 로 새지 않도록 가이드 텍스트 자체를 가드.
+        self.assertIn('서로 다른', self.prompt_text)
+        self.assertIn('도구', self.prompt_text)
+
+
+# ---------------------------------------------------------------------------
+# §6.9 v0.5.1 — LLM tier follow-up 4 case → _llm_classify 1회 호출
+# ---------------------------------------------------------------------------
+
+class LlmTierFollowupCallCountTests(TestCase):
+    """plan §3: 4건 follow-up 은 LLM Router 를 한 번 호출하고, 결과가 single_shot."""
+
+    FRAGILE_CASES = (
+        '비싼거',
+        '2번째로 비싼거',
+        '이거 말고 더 있을건데',
+        '만약 5년 근무하면?',
+    )
+
+    def test_each_follow_up_calls_llm_classify_once(self):
+        history = [
+            {'role': 'user', 'content': '경조사 규정 알려줘'},
+            {'role': 'assistant', 'content': '본인 상 500만원, 배우자 상 100만원 ...'},
+        ]
+        for question in self.FRAGILE_CASES:
+            with self.subTest(question=question):
+                llm_mock = MagicMock(
+                    return_value=LlmRouteResult(
+                        route=ROUTE_SINGLE_SHOT, reason='llm:followup',
+                    ),
+                )
+                with patch(
+                    'chat.services.question_router._llm_classify', llm_mock,
+                ):
+                    decision = route_question(question, history)
+                self.assertEqual(decision.route, ROUTE_SINGLE_SHOT)
+                self.assertEqual(llm_mock.call_count, 1)
+
+    def test_follow_up_passes_history_to_llm(self):
+        # history 가 실제로 `_llm_classify` 까지 전달되는지 박제 — plan §5 history 경로.
+        history = [
+            {'role': 'user', 'content': '경조사 규정 알려줘'},
+            {'role': 'assistant', 'content': '본인 상 500만원 ...'},
+        ]
+        captured = {}
+
+        def fake_classify(question, hist):
+            captured['question'] = question
+            captured['history'] = hist
+            return LlmRouteResult(route=ROUTE_SINGLE_SHOT, reason='llm:followup')
+
+        with patch(
+            'chat.services.question_router._llm_classify',
+            side_effect=fake_classify,
+        ):
+            route_question('비싼거', history)
+        self.assertEqual(captured['question'], '비싼거')
+        self.assertIs(captured['history'], history)

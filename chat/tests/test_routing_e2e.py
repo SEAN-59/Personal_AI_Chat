@@ -195,6 +195,30 @@ class DateConditionRoutingTests(TestCase):
         self.assertIn('마감일', decision.matched_rules)
 
 
+class V051DateConditionFragileCaseTests(TestCase):
+    """v0.5.1 plan §3 — DATE_CONDITION 5 case 가 LLM Router 를 건너뛰고 agent 로.
+
+    `_llm_classify` 는 setUpModule 에서 None 반환 mock 되어 있으므로, 본 테스트는
+    Tier 2 가 그 mock 을 건드리지도 않고 agent 로 빠지는지 확인한다. 모듈 단위
+    호출 카운트는 `test_llm_router.py` 의 `LlmTier*` 클래스에서 별도로 박제.
+    """
+
+    FRAGILE_DATE_CASES = (
+        '급여 지급일은?',
+        '지급 일',
+        '정산일',
+        '만료일',
+        '마감일',
+    )
+
+    def test_each_fragile_date_case_routes_to_agent_via_keyword(self):
+        for question in self.FRAGILE_DATE_CASES:
+            with self.subTest(question=question):
+                decision = route_question(question)
+                self.assertEqual(decision.route, ROUTE_AGENT)
+                self.assertEqual(decision.reason, 'date_condition_keyword')
+
+
 class DbRuleSpacingTests(TestCase):
     """DB RouterRule 의 contains 매칭이 띄어쓰기 변이도 잡는지 (Phase 9-1).
 
