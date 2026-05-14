@@ -48,8 +48,12 @@ def build_messages(
     # ① 시스템 프롬프트 (역할·말투 규칙)
     messages.append({'role': 'system', 'content': load_prompt('chat/system.md')})
 
-    # ② 과거 대화 히스토리 그대로 이어붙임
-    messages.extend(history)
+    # ② 과거 대화 히스토리: 최종 답변 생성 단계에서는 이전 assistant 답변의
+    #    숫자·금액·일수 같은 factual content 가 현재 회사 자료보다 우선되어
+    #    답변을 오염시키는 사례가 있어(v0.5.3 QA 보강 S2), assistant role
+    #    메시지는 제외하고 user role 만 남긴다. query_rewriter / llm_router /
+    #    workflow extractor 가 쓰는 history 는 별도 경로이므로 영향 없음.
+    messages.extend(_sanitize_history_for_answer(history))
 
     # ③ 이번 turn의 user 메시지: 자료 + 과거참고 + 질문
     user_content = _render_user_content(
@@ -58,6 +62,71 @@ def build_messages(
     messages.append({'role': 'user', 'content': user_content})
 
     return messages
+
+
+def _sanitize_history_for_answer(
+    history: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """답변 생성용 history sanitization.
+
+    이전 assistant 답변은 숫자/금액/일수가 박혀 있어, 같은 세션에서 회사 자료가
+    재임베딩으로 갱신된 경우(예: 200만 → 2000만) 모델이 옛 assistant 답변을
+    근거로 삼아 새 자료를 무시하는 회귀가 관찰되었다. 따라서 assistant 메시지는
+    제외하고, user 메시지만 유지해 대화 흐름은 보존한다.
+    """
+    sanitized: List[Dict[str, Any]] = []
+    for msg in history:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get('role') == 'user':
+            sanitized.append(msg)
+    return sanitized
+
+
+def _extract_key_excerpts(
+    query: str,
+    chunk_hits: List[ChunkHit],
+    *,
+    max_chars: int = 320,
+    window: int = 150,
+) -> List[tuple]:
+    """질문/검색어가 chunk content 안에서 매치되는 주변 텍스트를 잘라낸다.
+
+    v0.5.3 QA 보강 S3 — 전체 chunk content 를 그대로 나열만 하면 LLM 이 핵심
+    수치를 흘리는 회귀가 있어, 매치 주변 window 를 '핵심 발췌' 로 먼저 보여 준다.
+
+    매칭 우선순위: ① 전체 phrase (공백 포함) → ② 2글자 이상 token 중 가장 긴 것.
+    chunk 별로 최대 한 개 발췌만 추출, 발췌는 `max_chars` 로 잘라낸다.
+    반환: [(자료번호(1-base), 발췌 텍스트), ...]
+    """
+    q = (query or '').strip()
+    if not q or not chunk_hits:
+        return []
+
+    tokens = sorted(
+        {t for t in q.split() if len(t) >= 2},
+        key=len,
+        reverse=True,
+    )
+    candidates = [q] + [t for t in tokens if t != q]
+
+    excerpts: List[tuple] = []
+    for i, hit in enumerate(chunk_hits, 1):
+        content = hit.content or ''
+        if not content:
+            continue
+        for cand in candidates:
+            idx = content.find(cand)
+            if idx < 0:
+                continue
+            start = max(0, idx - window)
+            end = min(len(content), idx + len(cand) + window)
+            snippet = content[start:end].strip()
+            if len(snippet) > max_chars:
+                snippet = snippet[:max_chars].rstrip() + '…'
+            excerpts.append((i, snippet))
+            break
+    return excerpts
 
 
 def _render_user_content(
@@ -72,6 +141,15 @@ def _render_user_content(
 
     # 회사 자료 섹션 (청크가 있을 때만)
     if chunk_hits:
+        # 핵심 발췌: 질문/검색어가 청크 안에서 매치되는 주변 window 를 먼저 노출.
+        # 전체 chunk content 가 길어 LLM 이 핵심 수치를 흘리는 회귀 방지용 (v0.5.3 QA 보강 S3).
+        query_source = (search_query or '').strip() or question
+        excerpts = _extract_key_excerpts(query_source, chunk_hits)
+        if excerpts:
+            for idx, snippet in excerpts:
+                sections.append(f'[자료 {idx} 핵심 발췌]')
+                sections.append(snippet)
+                sections.append('')
         sections.append('=== 회사 자료 ===')
         sections.append(load_prompt('chat/source_instruction.md'))
         sections.append('')

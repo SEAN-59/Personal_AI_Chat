@@ -75,9 +75,11 @@ def save_chat_log(
     embedding/dedup 키로 사용해 typo ChatLog cluster 오염을 막는다. 비어있으면
     raw 와 동일하다고 간주.
 
-    - 유사도 0.90 이상인 기존 ChatLog가 있으면 새로 저장하지 않고 기존 객체 반환
-    - 피드백이 동일 ChatLog에 누적되어 분산 방지
-    - 답변이 조금 다르더라도 기존 답변은 건드리지 않음 (관리자가 BO에서 수정 가능)
+    - 유사도 0.90 이상이고 answer/sources 가 동일한 기존 ChatLog 가 있으면 재사용.
+    - 유사 existing 이 있어도 answer 또는 sources 가 다르면 새 ChatLog 를 만든다
+      (v0.5.3 QA 보강 S3 — BO 재임베딩으로 답변이 바뀌었는데 stale ChatLog 에
+      피드백이 붙는 회귀 차단).
+    - 피드백이 동일 ChatLog 에 누적되도록 dedup 자체는 유지.
     """
     embedding_key = normalized_question or question
     q_vec = embed_text(embedding_key)
@@ -89,7 +91,8 @@ def save_chat_log(
         .order_by('distance')
         .first()
     )
-    if existing:
+    new_sources = list(sources or [])
+    if existing and existing.answer == answer and list(existing.sources or []) == new_sources:
         return existing
 
     return ChatLog.objects.create(
@@ -97,7 +100,7 @@ def save_chat_log(
         normalized_question=normalized_question or '',
         question_embedding=q_vec,
         answer=answer,
-        sources=sources or [],
+        sources=new_sources,
     )
 
 

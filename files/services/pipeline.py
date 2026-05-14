@@ -118,6 +118,61 @@ def finalize_document(document: Document) -> int:
 
 
 # ---------------------------------------------------------------------------
+# READY 문서 재임베딩 (안전 계약: 실패 시 status READY 유지)
+# ---------------------------------------------------------------------------
+
+def reembed_document(document: Document, new_text: str) -> int:
+    """READY 문서의 텍스트를 교체하고 청크/임베딩을 원자적으로 재생성.
+
+    실패 시 기존 edited_text / chunks / status=READY 를 완전 보존하고
+    error_message 만 갱신 후 PipelineError 를 raise 한다.
+    (_mark_failed 호출 금지 — status FAILED 전환 금지)
+
+    Returns: 새로 생성된 청크 수
+    """
+    text = new_text.strip()
+    if not text:
+        raise PipelineError('편집된 텍스트가 비어있습니다.')
+
+    try:
+        chunks = chunk_text(text)
+        if not chunks:
+            raise PipelineError('청크 생성 실패 (텍스트가 비어있습니다)')
+        logger.info('재임베딩 청킹: %d개', len(chunks))
+
+        vectors = embed_texts(chunks)
+        if len(vectors) != len(chunks):
+            raise PipelineError(
+                f'임베딩 개수 불일치 (청크 {len(chunks)}개, 벡터 {len(vectors)}개)'
+            )
+        logger.info('재임베딩 임베딩: %d개', len(vectors))
+
+        with transaction.atomic():
+            DocumentChunk.objects.filter(document=document).delete()
+            DocumentChunk.objects.bulk_create([
+                DocumentChunk(
+                    document=document,
+                    chunk_index=i,
+                    content=chunk,
+                    embedding=vec,
+                )
+                for i, (chunk, vec) in enumerate(zip(chunks, vectors))
+            ])
+            document.edited_text = text
+            document.status = Document.Status.READY
+            document.error_message = ''
+            document.save(update_fields=['edited_text', 'status', 'error_message'])
+
+        return len(chunks)
+
+    except (EmbeddingError, PipelineError, Exception) as e:
+        logger.exception('재임베딩 실패 (READY 유지): %s', document.original_name)
+        document.error_message = str(e)[:2000]
+        document.save(update_fields=['error_message'])
+        raise PipelineError(str(e)) from e
+
+
+# ---------------------------------------------------------------------------
 # 공용
 # ---------------------------------------------------------------------------
 

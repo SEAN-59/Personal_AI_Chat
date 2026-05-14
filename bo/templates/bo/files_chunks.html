@@ -1,0 +1,40 @@
+{% extends 'bo/base.html' %}
+
+{% block title %}청크 확인 — {{ doc.original_name }}{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">청크 확인</h1>
+    <p class="page-description">{{ doc.original_name }} · 총 {{ total }}개 청크</p>
+  </div>
+  <a href="{% url 'bo:files' %}" class="btn">← 파일 목록</a>
+</header>
+
+<section class="card" style="margin-bottom: var(--space-4);">
+  <h2 class="card-title">문서 정보</h2>
+  <div style="display: flex; gap: var(--space-6); font-size: var(--font-size-sm);">
+    <span><strong>파일명:</strong> {{ doc.original_name }}</span>
+    <span><strong>상태:</strong>
+      {% if doc.status == 'ready' %}
+        <span class="badge badge-success">준비완료</span>
+      {% else %}
+        <span class="badge">{{ doc.status }}</span>
+      {% endif %}
+    </span>
+    <span><strong>청크 수:</strong> {{ total }}개</span>
+  </div>
+</section>
+
+{% for chunk in chunks %}
+  <section class="card" style="margin-top: var(--space-4);">
+    <h3 class="card-title">#{{ chunk.chunk_index }} <small style="font-weight: normal; color: var(--color-text-secondary);">({{ chunk.content|length }}자)</small></h3>
+    <pre style="white-space: pre-wrap; word-break: break-word; font-size: 13px; font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace; line-height: 1.5; margin: 0;">{{ chunk.content }}</pre>
+  </section>
+{% empty %}
+  <div class="empty-state">
+    <div class="empty-state-title">청크가 없습니다</div>
+    <div>이 문서에 저장된 청크가 없습니다.</div>
+  </div>
+{% endfor %}
+{% endblock %}
