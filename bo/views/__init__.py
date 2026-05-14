@@ -26,3 +26,10 @@ from .router_rules import (
     router_rules_bulk_delete,
 )
 from .agent import agent_view
+from .input_normalization import (
+    input_norm_index,
+    input_norm_new,
+    input_norm_edit,
+    input_norm_toggle,
+    input_norm_delete,
+)

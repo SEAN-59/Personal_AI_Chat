@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 
 from chat.graph.nodes.single_shot import single_shot_node
-from chat.graph.state import GraphState
+from chat.graph.state import GraphState, processing_question
 from chat.services.agent import runtime_settings as _rs
 from chat.services.agent.react import run_agent
 from chat.services.agent.reply import build_reply_from_agent_result
@@ -54,13 +54,14 @@ def agent_node(state: GraphState) -> dict:
         logger.info('agent 비활성 (AgentSettings.enabled=False) — single_shot 폴백')
         return single_shot_node(state)
 
-    raw_question = state.get('question') or ''
+    # v0.5.2 — agent 도구/rewriter 입력은 normalized. raw 는 ChatLog 저장 경로에만 의미.
+    normalized_question = processing_question(state)
     history = state.get('history') or []
 
-    effective_question = raw_question
+    effective_question = normalized_question
     if history:
         effective_question, rw_usage, rw_model = rewrite_query_with_history(
-            raw_question, history,
+            normalized_question, history,
         )
         if rw_usage and rw_model:
             try:

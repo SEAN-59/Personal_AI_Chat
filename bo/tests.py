@@ -450,3 +450,73 @@ class BoSharedPartialsMarkupTests(TestCase):
         body = response.content.decode('utf-8')
         # base.html 이 모든 페이지에 bo.js 로드.
         self.assertIn("/static/bo/bo.js", body)
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class InputNormalizationViewTests(TestCase):
+    """v0.5.2 — `/bo/input-normalization/` CRUD 회귀.
+
+    BO 인증 decorator 는 본 스코프 비포함 (plan §5.3). CSRF/POST 보호만 검증.
+    """
+
+    def test_index_empty(self):
+        url = reverse('bo:input_norm')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '입력 정규화')
+        self.assertContains(response, '아직 등록된 규칙이 없습니다')
+
+    def test_create_canonicalizes_pattern(self):
+        url = reverse('bo:input_norm_new')
+        response = self.client.post(url, {
+            'pattern': 'RUDWHTK　',
+            'replacement': '경조사',
+            'match_type': 'exact',
+            'priority': '100',
+            'enabled': 'on',
+            'description': '',
+        })
+        self.assertEqual(response.status_code, 302)
+        from chat.models import InputNormalizationRule
+        rule = InputNormalizationRule.objects.get()
+        self.assertEqual(rule.pattern, 'rudwhtk')
+
+    def test_create_invalid_returns_form(self):
+        url = reverse('bo:input_norm_new')
+        response = self.client.post(url, {
+            'pattern': 'a',
+            'replacement': 'alpha',
+            'match_type': 'contains',
+            'priority': '100',
+            'enabled': 'on',
+            'description': '',
+        })
+        # 검증 실패 → form 재렌더 (200), DB 추가 없음.
+        self.assertEqual(response.status_code, 200)
+        from chat.models import InputNormalizationRule
+        self.assertEqual(InputNormalizationRule.objects.count(), 0)
+
+    def test_toggle_post_only(self):
+        from chat.models import InputNormalizationRule
+        rule = InputNormalizationRule.objects.create(
+            pattern='abc', replacement='alpha', match_type='exact',
+        )
+        url = reverse('bo:input_norm_toggle', args=[rule.pk])
+        # GET 거부 (require_POST).
+        self.assertEqual(self.client.get(url).status_code, 405)
+        # POST 토글.
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        rule.refresh_from_db()
+        self.assertFalse(rule.enabled)
+
+    def test_delete_post_only(self):
+        from chat.models import InputNormalizationRule
+        rule = InputNormalizationRule.objects.create(
+            pattern='abc', replacement='alpha', match_type='exact',
+        )
+        url = reverse('bo:input_norm_delete', args=[rule.pk])
+        self.assertEqual(self.client.get(url).status_code, 405)
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(InputNormalizationRule.objects.count(), 0)

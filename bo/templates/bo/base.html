@@ -55,6 +55,13 @@
             </svg>
             라우팅 관리
           </a>
+          <a href="{% url 'bo:input_norm' %}" class="sidebar-nav-item {% if current == 'input_norm' or current == 'input_norm_new' or current == 'input_norm_edit' %}active{% endif %}">
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16M4 12h10M4 18h7"></path>
+              <path d="M14 18l3 3 6-6"></path>
+            </svg>
+            입력 정규화
+          </a>
           <a href="{% url 'bo:agent' %}" class="sidebar-nav-item {% if current == 'agent' %}active{% endif %}">
             <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3"></circle>

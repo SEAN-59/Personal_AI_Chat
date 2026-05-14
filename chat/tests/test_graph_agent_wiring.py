@@ -60,6 +60,21 @@ class GraphAgentWiringTests(SimpleTestCase):
         # 본 테스트가 끝나도 stub binding 이 lru_cache 에 남으면 곤란하므로 cleanup.
         self.addCleanup(_compiled_graph.cache_clear)
 
+        # v0.5.2 — normalize_node 가 START 와 router 사이에 추가됨. 노드 내부에서
+        # InputNormalizationRule DB 조회가 일어나면 SimpleTestCase 의 DB 차단에
+        # 걸리므로, raw 를 그대로 전달하는 no-op 으로 patch + cache_clear.
+        normalize_patcher = patch(
+            'chat.graph.app.normalize_node',
+            side_effect=lambda state: {
+                'question_raw': state.get('question') or '',
+                'question_normalized': state.get('question') or '',
+                'normalization_applied': [],
+            },
+        )
+        normalize_patcher.start()
+        self.addCleanup(normalize_patcher.stop)
+        _compiled_graph.cache_clear()
+
     def test_route_agent_dispatches_to_agent_node(self):
         with patch(
             'chat.graph.nodes.router.route_question',

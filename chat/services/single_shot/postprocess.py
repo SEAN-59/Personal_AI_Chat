@@ -88,16 +88,23 @@ def persist_chat_log(
     question: str,
     reply: str,
     chunk_hits: List[ChunkHit],
+    *,
+    normalized_question: str = '',
 ) -> Optional[int]:
     """자료 기반 답변에 대해 ChatLog 를 저장하고 pk 를 반환.
 
+    v0.5.2 — `question` 은 raw, `normalized_question` 은 정규화 결과(없으면 빈 문자열).
+    save_chat_log 가 embedding/dedup 키로 `normalized_question or question` 을 사용.
+
     실패는 로그만 남기고 None 반환 — 저장 실패가 응답 자체를 막지 않도록.
-    호출자는 이 함수를 부를지 여부(자료 있음 + no-info 아님 + casual 아님)를
-    판단해서 건네준다.
     """
     source_ids = sorted({h.document_id for h in chunk_hits})
     try:
-        cl = save_chat_log(question, reply, sources=source_ids)
+        cl = save_chat_log(
+            question, reply,
+            sources=source_ids,
+            normalized_question=normalized_question,
+        )
         return cl.pk
     except Exception as exc:
         logger.warning('ChatLog 저장 실패: %s', exc)
