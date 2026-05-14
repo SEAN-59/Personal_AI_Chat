@@ -3,13 +3,18 @@
 view / service 는 오직 run_chat_graph(question, history) 만 쓴다. state 구조나
 node 구성이 바뀌어도 이 함수의 시그니처·반환·예외는 고정이다 (Phase 3 이후에도).
 
-현재 graph shape:
-    START → router → (conditional on state.route)
-                        single_shot → END
-                        workflow   → END   (Phase 6-1 부터; 내부에서 dispatch 또는
-                                              single_shot fallback)
-                        agent      → END   (Phase 7-2 부터; agent_node 가 ReAct
-                                              loop 를 돌리고 결과를 reply 로 변환)
+현재 graph shape (v0.5.2 부터):
+    START → normalize → router → (conditional on state.route)
+                                    single_shot → END
+                                    workflow   → END   (Phase 6-1 부터; 내부에서
+                                                          dispatch 또는 single_shot fallback)
+                                    agent      → END   (Phase 7-2 부터; agent_node
+                                                          가 ReAct loop 를 돌리고
+                                                          결과를 reply 로 변환)
+
+v0.5.2: `normalize_node` 가 START 와 router 사이에 추가됨. BO `InputNormalizationRule`
+규칙으로 raw 입력을 정규화한 결과를 `question_normalized` 에 싣고, `question_raw` 는
+UI/ChatLog 표시용으로 보존한다. 활성 규칙이 없거나 매치되지 않으면 raw 와 동일.
 """
 
 from functools import lru_cache
@@ -17,6 +22,7 @@ from functools import lru_cache
 from langgraph.graph import END, START, StateGraph
 
 from chat.graph.nodes.agent import agent_node
+from chat.graph.nodes.normalize import normalize_node
 from chat.graph.nodes.router import router_node
 from chat.graph.nodes.single_shot import single_shot_node
 from chat.graph.nodes.workflow import workflow_node
@@ -29,12 +35,16 @@ from chat.services.single_shot.types import QueryPipelineError, QueryResult
 def _compiled_graph():
     """프로세스당 한 번만 compile. runserver/gunicorn 프로세스 교체 시 자연 리셋."""
     builder = StateGraph(GraphState)
+    builder.add_node('normalize', normalize_node)
     builder.add_node('router', router_node)
     builder.add_node('single_shot', single_shot_node)
     builder.add_node('workflow', workflow_node)
     builder.add_node('agent', agent_node)
 
-    builder.add_edge(START, 'router')
+    # v0.5.2: START → normalize → router. normalize_node 가 question_raw/
+    # question_normalized 를 채운 뒤 router 로 흐른다.
+    builder.add_edge(START, 'normalize')
+    builder.add_edge('normalize', 'router')
     builder.add_conditional_edges(
         'router',
         # state.route 값(ROUTE_* 중 하나)을 그대로 key 로 매핑한다.

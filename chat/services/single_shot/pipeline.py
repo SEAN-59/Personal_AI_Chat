@@ -8,8 +8,12 @@ helper 들을 엮어 하나의 질문에 대한 `QueryResult` 를 만든다. 외
 Phase 4-3: retrieval 앞단에 쿼리 재작성(rewrite) 단계가 붙는다. "비싼거"
 같이 맥락에 의존하는 후속 질문을 직전 대화 내용과 함께 cheap LLM 에 보내
 self-contained 검색어로 바꾼 뒤, 그 결과를 retrieve_documents /
-find_canonical_qa 에 넘긴다. 원본 `question` 은 그대로 LLM 프롬프트와
-ChatLog 에 흐른다 — 사용자가 입력한 문구를 보존한다.
+find_canonical_qa 에 넘긴다.
+
+v0.5.2: 첫 positional 은 **normalized_question** 으로 변경. rewrite / retrieval /
+prompt_builder 모두 normalized 입력을 사용한다. **raw_question** 은 keyword 인자
+로 함께 받아 ChatLog.question 저장(=UI/표시 진실 소스) 에만 쓰인다. raw_question
+이 생략되면 normalized 와 동일하다고 간주 — 정규화가 없는 코드 경로의 동작 변화 없음.
 """
 
 from typing import Dict, List, Optional
@@ -33,23 +37,28 @@ from chat.services.token_purpose import (
 
 
 def run_single_shot(
-    question: str,
+    normalized_question: str,
     history: Optional[List[Dict]] = None,
+    *,
+    raw_question: Optional[str] = None,
+    normalization_applied: Optional[List[Dict]] = None,
 ) -> QueryResult:
     """질문 하나를 single-shot 경로로 처리해 QueryResult 를 반환.
 
-    실패 시 `QueryPipelineError` 를 raise 한다. 호출자는 항상 같은 예외만
-    포착하면 된다 (graph 노드의 state.error 또는 view 의 502 매핑).
+    v0.5.2 — 첫 positional 은 **normalized**. 내부 rewriter/retrieval/prompt_builder
+    의 입력으로 사용. `raw_question` 은 ChatLog.question 저장용 (UI/표시 진실 소스).
+    `raw_question` 생략 시 normalized 와 동일하다고 간주 — 정규화가 없는 코드 경로
+    에서도 동작 변화 없음.
+
+    실패 시 `QueryPipelineError` 를 raise.
     """
     history = history or []
+    raw = raw_question if raw_question is not None else normalized_question
 
-    # 0) 검색어 재작성 — 맥락 의존 후속 질문을 self-contained 쿼리로 변환.
-    #    history 가 비어있거나 LLM 이 실패하면 원본 질문이 그대로 돌아온다.
+    # 0) 검색어 재작성 — normalized 입력 기준. history 가 비어있거나 LLM 실패 시 원본 반환.
     search_query, rewriter_usage, rewriter_model = rewrite_query_with_history(
-        question, history,
+        normalized_question, history,
     )
-    # 재작성 호출이 실제로 일어났다면 본 LLM 호출과 구분해 별도 레코드로 남긴다.
-    # 재작성 실패 / history 빈 경로에서는 usage 가 None 이라 기록하지 않는다.
     if rewriter_usage is not None and rewriter_model is not None:
         record_token_usage(
             rewriter_model, rewriter_usage,
@@ -67,10 +76,9 @@ def run_single_shot(
     if cached is not None:
         return cached
 
-    # 5) 프롬프트 조립 — raw question 은 원문 그대로, rewriter 결과는 별도 신호로 전달.
-    #    builder 가 둘이 같으면 기존 출력 유지, 다르면 '대화 맥락 반영 질문' 으로 함께 렌더.
+    # 5) 프롬프트 조립 — LLM 입력 질문은 normalized. retrieval/rewriter 모두 normalized 기반.
     messages = build_single_shot_messages(
-        question, chunk_hits, qa_hits, history, search_query=search_query,
+        normalized_question, chunk_hits, qa_hits, history, search_query=search_query,
     )
 
     # 6) OpenAI 호출
@@ -84,7 +92,10 @@ def run_single_shot(
     saved_chat_log_id: Optional[int] = None
     sources: List[Dict] = []
     if chunk_hits and not is_no_info and not is_casual:
-        saved_chat_log_id = persist_chat_log(question, reply, chunk_hits)
+        saved_chat_log_id = persist_chat_log(
+            raw, reply, chunk_hits,
+            normalized_question=normalized_question if normalized_question != raw else '',
+        )
         sources = build_sources(chunk_hits)
 
     return QueryResult(

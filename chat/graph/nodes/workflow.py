@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from typing import Mapping
 
-from chat.graph.state import GraphState
+from chat.graph.state import GraphState, processing_question
 from chat.graph.nodes.single_shot import single_shot_node
 from chat.services.query_rewriter import rewrite_query_with_history
 from chat.services.single_shot.postprocess import record_token_usage
@@ -49,7 +49,8 @@ def workflow_node(state: GraphState) -> dict:
         return single_shot_node(state)
 
     entry = registry.get(key)
-    raw_question = state.get('question') or ''
+    # v0.5.2 — workflow 내부 처리는 normalized 입력. extractor / rewriter 모두 normalized 기반.
+    normalized_question = processing_question(state)
     history = state.get('history') or []
 
     # 외부가 미리 채워 보낸 workflow_input 이 있으면 rewriter·extractor 둘 다 스킵.
@@ -60,10 +61,10 @@ def workflow_node(state: GraphState) -> dict:
     else:
         # Phase 6-3: retrieval 을 돌리는 workflow 에 한해 history-aware rewrite.
         # rewriter 는 history 가 비었으면 LLM 호출 없이 원본 반환하므로 실질 비용 낮음.
-        effective_question = raw_question
+        effective_question = normalized_question
         if history and _schema_needs_retrieval(entry.input_schema):
             effective_question, rw_usage, rw_model = rewrite_query_with_history(
-                raw_question, history,
+                normalized_question, history,
             )
             if rw_usage and rw_model:
                 record_token_usage(

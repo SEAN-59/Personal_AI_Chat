@@ -22,8 +22,15 @@ from chat.services.single_shot.types import QueryResult
 
 class GraphState(TypedDict, total=False):
     # ─── 입력 ──────────────────────────────────────────
-    question: str            # 사용자 질문 원문
+    question: str            # 사용자 질문 원문 (raw — 호환 의미 유지)
     history: list[dict]      # 세션 히스토리 [{'role':..., 'content':...}, ...]
+
+    # ─── v0.5.2 정규화 (normalize_node 가 채움) ────────
+    # `question` 의 의미는 raw 그대로 두고, raw/normalized 를 별도로 명시한다.
+    # raw 가 비어있으면 question 으로 fallback (호환).
+    question_raw: str            # UI/ChatLog.question/history 표시용
+    question_normalized: str     # router/rewriter/retrieval/agent/workflow 내부 처리용
+    normalization_applied: list[dict]  # AppliedRule.__dict__ 직렬화. 길이 0 또는 1.
 
     # ─── router 결과 ──────────────────────────────────
     # Phase 4-1 기준: 'single_shot' / 'workflow' / 'agent' (chat.graph.routes 참조).
@@ -40,3 +47,17 @@ class GraphState(TypedDict, total=False):
 
     # ─── 에러 전달 (노드 내부에서 포착한 메시지) ──────
     error: Optional[str]
+
+
+def processing_question(state) -> str:
+    """내부 처리용 질문 — normalized 우선, 없으면 raw question 으로 fallback.
+
+    v0.5.2 — router / rewriter / retrieval / agent / workflow 모두 이 헬퍼로
+    질문을 꺼낸다. raw 직접 참조 금지 (raw 보존 계약과 충돌).
+    """
+    return state.get('question_normalized') or state.get('question') or ''
+
+
+def raw_question(state) -> str:
+    """UI/ChatLog/history 표시용 raw 질문."""
+    return state.get('question_raw') or state.get('question') or ''

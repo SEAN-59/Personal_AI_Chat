@@ -62,14 +62,25 @@ def search_canonical_qa(
 CHATLOG_DEDUP_MAX_DISTANCE = 0.10
 
 
-def save_chat_log(question: str, answer: str, sources: Optional[list] = None) -> ChatLog:
+def save_chat_log(
+    question: str,
+    answer: str,
+    sources: Optional[list] = None,
+    *,
+    normalized_question: str = '',
+) -> ChatLog:
     """대화 한 턴을 ChatLog에 저장. 유사 질문이 있으면 기존 것 재사용.
+
+    v0.5.2 — `question` 은 raw (UI/표시 진실 소스). `normalized_question` 이 있으면
+    embedding/dedup 키로 사용해 typo ChatLog cluster 오염을 막는다. 비어있으면
+    raw 와 동일하다고 간주.
 
     - 유사도 0.90 이상인 기존 ChatLog가 있으면 새로 저장하지 않고 기존 객체 반환
     - 피드백이 동일 ChatLog에 누적되어 분산 방지
     - 답변이 조금 다르더라도 기존 답변은 건드리지 않음 (관리자가 BO에서 수정 가능)
     """
-    q_vec = embed_text(question)
+    embedding_key = normalized_question or question
+    q_vec = embed_text(embedding_key)
 
     existing = (
         ChatLog.objects
@@ -83,6 +94,7 @@ def save_chat_log(question: str, answer: str, sources: Optional[list] = None) ->
 
     return ChatLog.objects.create(
         question=question,
+        normalized_question=normalized_question or '',
         question_embedding=q_vec,
         answer=answer,
         sources=sources or [],
@@ -92,14 +104,16 @@ def save_chat_log(question: str, answer: str, sources: Optional[list] = None) ->
 def promote_to_canonical(chat_log: ChatLog) -> CanonicalQA:
     """ChatLog를 CanonicalQA로 승격 (관리자 액션).
 
-    이미 이 ChatLog에서 승격된 CanonicalQA가 있으면 중복 생성하지 않고
-    기존 것을 반환한다.
+    v0.5.2 — 공식 Q&A 의 question 은 `chat_log.normalized_question or chat_log.question`
+    을 사용. raw typo 가 그대로 promote 되어 CanonicalQA 가 오염되는 것을 막는다.
+    이미 이 ChatLog에서 승격된 CanonicalQA가 있으면 중복 생성하지 않고 기존 것을 반환.
     """
     existing = CanonicalQA.objects.filter(source_chatlog=chat_log).first()
     if existing:
         return existing
+    canonical_question = chat_log.normalized_question or chat_log.question
     return CanonicalQA.objects.create(
-        question=chat_log.question,
+        question=canonical_question,
         question_embedding=chat_log.question_embedding,
         answer=chat_log.answer,
         sources=chat_log.sources,

@@ -1,9 +1,12 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import CheckConstraint, Q
+from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 from pgvector.django import HnswIndex, VectorField
+
+from chat.utils.text_normalization import canonicalize
 
 # 임베딩 차원 (text-embedding-3-small 기준)
 EMBEDDING_DIM = 1536
@@ -19,6 +22,10 @@ class ChatLog(models.Model):
     """
 
     question = models.TextField()
+    # v0.5.2: BO InputNormalizationRule 이 적용된 결과. 비어있으면 raw 와 동일.
+    # UI/표시는 항상 `question` (raw). embedding/dedup/promotion 의 키는
+    # `normalized_question or question` 기준 — qa_retriever 참조.
+    normalized_question = models.TextField(blank=True, default='')
     question_embedding = VectorField(dimensions=EMBEDDING_DIM)
     answer = models.TextField()
     # 답변 생성 시 참조했던 Document id 목록
@@ -361,3 +368,109 @@ class AgentSettingsAudit(models.Model):
         who = self.changed_by.username if self.changed_by else '(익명)'
         fields = ', '.join(self.changes.keys()) if self.changes else '—'
         return f'[{when}] {who} → {fields}'
+
+
+class InputNormalizationRule(models.Model):
+    """v0.5.2 — BO에서 관리하는 사용자 입력 정규화 규칙.
+
+    코드 어디에도 사내 용어 사전을 하드코딩하지 않는다. 운영자가 BO에서 등록한
+    규칙만으로 raw 입력을 normalized 텍스트로 보정한다. raw 는 항상 보존되고,
+    normalized 는 router/rewriter/retrieval/agent/workflow 내부 처리에만 사용.
+
+    pattern 은 `clean()` 첫 줄에서 `canonicalize()` (NFKC + strip + casefold) 가
+    강제 적용된 값으로 저장된다 → ModelForm/admin/`Model().save()`/`objects.create`
+    어느 경로로 저장해도 동일 canonical 형태. `QuerySet.update` / `bulk_create` /
+    `loaddata` / raw SQL 은 `save()` 를 우회하므로 canonical 보장 없음 — 운영 금지.
+
+    validation 책임은 `clean()` 일원화:
+      V1: contains 규칙은 canonical pattern 길이 >= 2
+      V2: canonical(pattern) != canonical(replacement) (no-op 방지)
+      V3: replacement.strip() 비어있지 않음
+    ModelForm 은 full_clean() 으로 위 검증을 그대로 사용.
+    """
+
+    class MatchType(models.TextChoices):
+        EXACT = 'exact', '정확히 일치 (exact)'
+        CONTAINS = 'contains', '포함 (contains)'
+
+    pattern = models.CharField(
+        max_length=200,
+        help_text=(
+            '치환할 입력 키 (예: "rudwhtk").\n'
+            '저장 시 자동으로 NFKC + strip + casefold 가 적용됩니다.'
+        ),
+    )
+    replacement = models.CharField(
+        max_length=200,
+        help_text=(
+            '정규화 결과 (예: "경조사").\n'
+            '운영자가 입력한 원형 그대로 사용됩니다 — casefold 등 변형 없음.'
+        ),
+    )
+    match_type = models.CharField(
+        max_length=20,
+        choices=MatchType.choices,
+        default=MatchType.EXACT,
+        help_text=(
+            '• 정확히 일치 — canonical 입력 전체가 pattern 과 같을 때만 적용\n'
+            '• 포함 — canonical 입력 안에 pattern 이 들어 있으면 첫 1회 치환\n'
+            '※ contains 는 pattern 길이 2 이상만 허용 (과잉 적용 방지).'
+        ),
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text='체크를 풀면 이 규칙을 무시합니다 (삭제하지 않고 잠시 꺼두는 용도).',
+    )
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text=(
+            '숫자가 클수록 먼저 평가됩니다.\n'
+            '동률이면 id ASC (먼저 등록된 규칙)가 우선.'
+        ),
+    )
+    description = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-priority', 'id']
+        constraints = [
+            UniqueConstraint(
+                fields=['pattern', 'match_type'],
+                name='inputnorm_pattern_matchtype_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['enabled', '-priority']),
+        ]
+
+    def __str__(self):
+        flag = '' if self.enabled else ' [off]'
+        return f'[{self.match_type}] "{self.pattern}" → "{self.replacement}"{flag}'
+
+    def clean(self):
+        # 1) canonicalize pattern — Form/admin/save() 어느 경로든 동일 canonical 값으로
+        #    validate_unique() 가 돌도록 첫 줄에서 mutating 적용.
+        self.pattern = canonicalize(self.pattern)
+        replacement = self.replacement or ''
+
+        # V3: replacement 빈 값 reject
+        if not replacement.strip():
+            raise ValidationError({'replacement': '치환 결과(replacement)는 비울 수 없습니다.'})
+
+        # V1: contains 최소 길이 2
+        if self.match_type == self.MatchType.CONTAINS and len(self.pattern) < 2:
+            raise ValidationError({'pattern': 'contains 규칙의 pattern 은 (canonical 기준) 2자 이상이어야 합니다.'})
+
+        # V2: no-op 방지 — canonical 비교
+        if self.pattern and canonicalize(replacement) == self.pattern:
+            raise ValidationError('pattern 과 replacement 가 같으면 정규화 효과가 없습니다.')
+
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        # full_clean() 이 clean() 을 호출 → canonicalize + V1~V3 + validate_unique()
+        # 까지 한 번에 수행. 이 순서가 깨지면 비-canonical 값으로 unique 검증이 돌아
+        # IntegrityError 가 super().save() 단에서 터질 수 있음 (Codex v4 finding 1).
+        self.full_clean()
+        return super().save(*args, **kwargs)

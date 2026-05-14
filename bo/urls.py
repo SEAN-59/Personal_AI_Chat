@@ -53,4 +53,11 @@ urlpatterns = [
 
     # Agent 운영 제어 (Phase 8-3) — singleton 페이지라 pk 없음.
     path('agent/', views.agent_view, name='agent'),
+
+    # v0.5.2: 입력 정규화 규칙 CRUD.
+    path('input-normalization/', views.input_norm_index, name='input_norm'),
+    path('input-normalization/new/', views.input_norm_new, name='input_norm_new'),
+    path('input-normalization/<int:pk>/edit/', views.input_norm_edit, name='input_norm_edit'),
+    path('input-normalization/<int:pk>/toggle/', views.input_norm_toggle, name='input_norm_toggle'),
+    path('input-normalization/<int:pk>/delete/', views.input_norm_delete, name='input_norm_delete'),
 ]

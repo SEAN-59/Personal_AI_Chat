@@ -16,7 +16,7 @@ single_shot 폴백 정책은 7-2 에서 제거됨.)
 import logging
 
 from chat.graph.routes import ROUTE_SINGLE_SHOT
-from chat.graph.state import GraphState
+from chat.graph.state import GraphState, processing_question
 from chat.services.question_router import route_question
 
 
@@ -24,8 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 def router_node(state: GraphState) -> dict:
-    """state.question → RouteDecision → state.route/route_reason/matched_rules/workflow_key."""
-    decision = route_question(state['question'], state.get('history', []))
+    """state 의 normalized question → RouteDecision → state.route/route_reason/...
+
+    v0.5.2 — DB RouterRule / DATE_CONDITION / LLM Router 모두 normalized 입력 기준.
+    `processing_question(state)` 가 normalized 가 비면 raw 로 fallback 한다.
+    """
+    decision = route_question(processing_question(state), state.get('history', []))
 
     if decision.route != ROUTE_SINGLE_SHOT:
         logger.info(
