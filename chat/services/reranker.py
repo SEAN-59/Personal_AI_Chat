@@ -51,11 +51,15 @@ def rerank(question: str, candidates: List[ChunkHit], top_k: int = 5) -> List[Ch
         logger.warning('OPENAI_API_KEY 없음 → 재정렬 스킵')
         return candidates[:top_k]
 
-    # 프롬프트 구성 — 후보마다 번호 부여
+    # 프롬프트 구성 — 후보마다 번호 + 출처 메타 (v0.5.4).
+    # 동일 document 내 의미 중복 chunk 가 무작위로 정렬되는 회귀를 막기 위해
+    # LLM 에 document_name / chunk_index 를 명시한다.
     numbered = []
     for i, hit in enumerate(candidates):
         content = hit.content[:MAX_CONTENT_CHARS].replace('\n', ' ')
-        numbered.append(f'[{i}] {content}')
+        numbered.append(
+            f'[{i}] (문서: {hit.document_name}, chunk #{hit.chunk_index}) {content}'
+        )
     candidates_block = '\n\n'.join(numbered)
 
     prompt = (

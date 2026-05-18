@@ -19,6 +19,7 @@ fallback:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from chat.services.prompt_loader import load_prompt
@@ -41,6 +42,48 @@ _PROMPT_PATH = 'chat/query_rewriter.md'
 
 # 비정상적으로 긴 응답은 프롬프트 탈선으로 간주하고 버린다.
 _MAX_REWRITE_LEN = 200
+
+
+# ---------------------------------------------------------------------------
+# v0.5.4 — monetary metric guard
+#
+# 도메인 어휘/행 이름/숫자 하드코딩 없이, "금액 축으로 비교를 요청한 follow-up
+# 인지" 만 generic 단서로 판정한다. 단서가 모이면 cleaned rewrite 에 generic
+# metric phrase (`지급금액 기준`) 를 덧붙여 retriever 가 기간/일수 등 비-금액
+# chunk 로 흐르는 회귀를 차단한다.
+# ---------------------------------------------------------------------------
+
+# 가격 축 비교 신호. 부분 문자열 매칭으로 `비싼거`/`더 비싸`/`2번째로 비싼` 같은
+# 변형을 모두 포착.
+_MONETARY_COMPARATIVE_HINTS = ('비싼', '비싸', '싼거', '싼것', '저렴')
+
+# 직전 답변/표가 금전 축임을 시사하는 generic metric 단어. 도메인 어휘는 포함
+# 하지 않는다.
+_MONETARY_HISTORY_METRIC_WORDS = (
+    '금액', '지원금액', '지급금액', '지원금',
+    '비용', '한도', '단가', '가격', '요금',
+)
+
+# 금액 표기 정규식. 숫자 뒤에 단위(`만원`/`만 원`/`만`/`억원`/`억`/`원`) 가 붙은
+# 형태만 본다. 단일 문자 `원` 의 substring 매칭은 의도적으로 회피해 일반 단어
+# 안에 `원` 이 들어가는 경우의 false positive 를 막는다.
+_AMOUNT_PATTERN = re.compile(
+    r'\d[\d,\.]*\s*(?:만\s*원|만원|만|억\s*원|억원|억|원)'
+)
+
+# 이미 rewrite 가 금전 축을 명시한 경우엔 손대지 않는다.
+_MONETARY_METRIC_TOKENS_IN_REWRITE = (
+    '금액', '지급금액', '지원금액', '지원금', '비용', '한도',
+    '단가', '가격', '요금',
+)
+
+# 사용자가 명시적으로 기간/일수 축을 물은 경우엔 guard 발동 금지.
+_DURATION_AXIS_HINTS = (
+    '휴가', '일수', '며칠', '몇일', '기간', '일째', '날짜',
+)
+
+# 부착할 generic metric phrase. 회사 고유어 없음.
+_MONETARY_METRIC_SUFFIX = '지급금액 기준'
 
 
 def rewrite_query_with_history(
@@ -80,8 +123,50 @@ def rewrite_query_with_history(
         )
         return question, usage, model
 
+    cleaned = _apply_monetary_metric_guard(question, history_slice, cleaned)
+
     logger.info('쿼리 재작성: %r → %r', question, cleaned)
     return cleaned, usage, model
+
+
+def _apply_monetary_metric_guard(
+    question: str,
+    history_slice: List[Dict[str, Any]],
+    cleaned: str,
+) -> str:
+    """가격 축 follow-up 에 금액 metric 토큰이 빠져있으면 generic suffix 부착.
+
+    프롬프트가 metric 보존 규칙을 지시해도 LLM 이 흘릴 수 있어, deterministic
+    guard 로 retrieval 입력을 안정화한다. 도메인 어휘 하드코딩 없음.
+    """
+    q = (question or '').strip()
+    if not q:
+        return cleaned
+
+    # (a) 현재 질문이 가격 축 비교 follow-up 인가?
+    if not any(hint in q for hint in _MONETARY_COMPARATIVE_HINTS):
+        return cleaned
+
+    # (b) 사용자가 명시적으로 기간/휴가 축을 물었다면 guard 발동 금지.
+    if any(hint in q for hint in _DURATION_AXIS_HINTS):
+        return cleaned
+
+    # (c) 직전 history 에 금전 단위 단서가 있는가? (generic 단어 OR 금액 패턴)
+    history_blob = ' '.join(
+        (m.get('content') or '') for m in history_slice
+    )
+    has_metric_word = any(
+        word in history_blob for word in _MONETARY_HISTORY_METRIC_WORDS
+    )
+    has_amount = bool(_AMOUNT_PATTERN.search(history_blob))
+    if not (has_metric_word or has_amount):
+        return cleaned
+
+    # (d) 이미 rewrite 가 금전 metric 을 포함한다면 손대지 않는다.
+    if any(tok in cleaned for tok in _MONETARY_METRIC_TOKENS_IN_REWRITE):
+        return cleaned
+
+    return f'{cleaned} {_MONETARY_METRIC_SUFFIX}'
 
 
 # ---------------------------------------------------------------------------

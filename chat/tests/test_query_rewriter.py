@@ -66,19 +66,21 @@ class QueryRewriterTests(TestCase):
         self.assertIsNone(model)
 
     def test_follow_up_uses_rewritten_query(self):
+        # 비교 follow-up 이지만 history 에 금전 단서가 없도록 다른 도메인으로 구성.
+        # (monetary metric guard 는 별도 테스트에서 검증.)
         history = [
-            {'role': 'user', 'content': '경조사 규정 알려줘'},
-            {'role': 'assistant', 'content': '경조사 규정: 본인 상 500만원, 배우자 상 100만원 ...'},
+            {'role': 'user', 'content': '연차 규정 알려줘'},
+            {'role': 'assistant', 'content': '입사 1년 11일, 2년 15일, 3년 16일 ...'},
         ]
         with patch(
             'chat.services.query_rewriter.run_chat_completion',
-            return_value=_stub_completion('경조사 중 가장 비싼 항목'),
+            return_value=_stub_completion('연차 일수가 가장 많은 연차'),
         ):
             result, usage, model = query_rewriter.rewrite_query_with_history(
-                '비싼거',
+                '제일 많은거',
                 history=history,
             )
-        self.assertEqual(result, '경조사 중 가장 비싼 항목')
+        self.assertEqual(result, '연차 일수가 가장 많은 연차')
         self.assertEqual(model, 'gpt-4o-mini')
         self.assertIsNotNone(usage)
 
@@ -151,9 +153,30 @@ class QueryRewriterPremiseTests(TestCase):
         self.assertIn('가장', prompt_text)
         # rewriter 가 후보 행을 미리 확정하지 말라는 부정 지시.
         self.assertIn('부모 상', prompt_text)
-        # Example.
+        # Example (v0.5.4 monetary metric — "비싼" 은 금액 축으로 고정).
         self.assertIn('Current question: 2번째로 비싼거', prompt_text)
-        self.assertIn('Rewrite: 경조사 중 두 번째로 비싼 항목', prompt_text)
+        self.assertIn('Rewrite: 경조사 지급금액 중 두 번째로 큰 항목', prompt_text)
+
+    def test_query_rewriter_prompt_contains_monetary_metric_rule(self):
+        """v0.5.4 — monetary comparative follow-up 은 금액 축을 보존해야 한다.
+
+        '비싼/싼/큰/작은/높은/낮은' 같은 비교 후속 질의가 휴가 일수 등 비-금액
+        chunk 로 라우팅되는 회귀(=취업규칙 출산 휴가 20일이 '비싼거' 로 잡힘)를
+        막기 위해 prompt rule + example 둘 다 박혀 있어야 한다.
+        """
+        from chat.services.prompt_loader import load_prompt
+
+        prompt_text = load_prompt('chat/query_rewriter.md')
+        # 규칙 라인.
+        self.assertIn('Preserve the comparison metric', prompt_text)
+        self.assertIn('지급금액', prompt_text)
+        self.assertIn('경조금', prompt_text)
+        # 휴가 축으로 흘리지 말라는 부정 신호.
+        self.assertIn('일수', prompt_text)
+        self.assertIn('휴가', prompt_text)
+        # `비싼거` 예제가 금액 metric 으로 재작성된다.
+        self.assertIn('Current question: 비싼거', prompt_text)
+        self.assertIn('Rewrite: 경조사 지급금액 중 가장 큰 항목', prompt_text)
 
     def test_query_rewriter_prompt_contains_exclusion_rule(self):
         """v0.5.1 plan §3 — exclusion/negation follow-up 보존 가드."""
@@ -221,6 +244,125 @@ class QueryRewriterPremiseTests(TestCase):
         self.assertIsNone(usage)
         self.assertIsNone(model)
 
+    # ------------------------------------------------------------------
+    # v0.5.4 — deterministic monetary metric guard
+    # ------------------------------------------------------------------
+
+    def _money_history(self):
+        return [
+            {'role': 'user', 'content': '경조사 규정 알려줘'},
+            {'role': 'assistant',
+             'content': '경조사 지원금액 표 — 본인 결혼 100만원, 본인 상 500만원, 배우자 상 100만원 ...'},
+        ]
+
+    def test_monetary_guard_adds_metric_suffix_when_missing(self):
+        history = self._money_history()
+        usage_stub = _stub_completion('경조사 중 가장 비싼 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 중 가장 비싼 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '비싼거?', history=history,
+            )
+        # 금액 축 토큰 보강.
+        self.assertTrue('금액' in result or '지급금액' in result)
+        # 원본 LLM 출력의 의미·ordinal·comparative 토큰 보존.
+        self.assertIn('경조사', result)
+        self.assertIn('가장', result)
+        self.assertIn('비싼', result)
+
+    def test_monetary_guard_preserves_ordinal(self):
+        history = self._money_history()
+        usage_stub = _stub_completion('경조사 중 두 번째로 비싼 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 중 두 번째로 비싼 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '2번째로 비싼거?', history=history,
+            )
+        self.assertTrue('금액' in result or '지급금액' in result)
+        self.assertIn('두 번째', result)
+        self.assertIn('비싼', result)
+
+    def test_monetary_guard_skipped_when_duration_axis_explicit(self):
+        history = self._money_history()
+        usage_stub = _stub_completion('경조사 휴가 일수 가장 긴 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 휴가 일수 가장 긴 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '휴가가 제일 긴거?', history=history,
+            )
+        # 명시적 휴가/일수 축 → 금액 metric 부착 금지.
+        self.assertNotIn('지급금액 기준', result)
+        self.assertNotIn('금액', result)
+
+    def test_monetary_guard_noop_when_rewrite_already_has_metric(self):
+        history = self._money_history()
+        usage_stub = _stub_completion('경조사 지급금액 중 가장 큰 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 지급금액 중 가장 큰 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '비싼거?', history=history,
+            )
+        # 이미 metric 이 들어있으므로 그대로.
+        self.assertEqual(result, '경조사 지급금액 중 가장 큰 항목')
+
+    def test_monetary_guard_triggers_on_amount_pattern_only_history(self):
+        # history 에 `금액` 같은 generic 단어 없이 금액 표기 패턴만 있어도 발동.
+        history = [
+            {'role': 'user', 'content': '경조사 규정 알려줘'},
+            {'role': 'assistant', 'content': '본인 결혼 100만 원, 본인 상 500만원, 부모 상 20,000원 ...'},
+        ]
+        usage_stub = _stub_completion('경조사 중 가장 비싼 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 중 가장 비싼 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '비싼거?', history=history,
+            )
+        self.assertIn('지급금액 기준', result)
+
+    def test_monetary_guard_skipped_on_false_positive_words(self):
+        # history 에 `직원/원칙/원본` 등만 있고 금액 패턴/금전 metric 단어가
+        # 없으면 발동 금지 (single-char `원` substring 매칭 회귀 방지).
+        history = [
+            {'role': 'user', 'content': '회사 정책 알려줘'},
+            {'role': 'assistant', 'content': '직원 행동 원칙 — 원본 자료는 사내 포털에 보관 ...'},
+        ]
+        usage_stub = _stub_completion('회사 정책 중 가장 비싼 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('회사 정책 중 가장 비싼 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '비싼거?', history=history,
+            )
+        self.assertNotIn('지급금액 기준', result)
+        self.assertNotIn('금액', result)
+
+    def test_monetary_guard_skipped_without_history_monetary_cue(self):
+        # history 에 금전 단서가 없으면 가격 비교 follow-up 이라도 guard 미발동.
+        history = [
+            {'role': 'user', 'content': '연차 규정 알려줘'},
+            {'role': 'assistant', 'content': '입사 1년 차 연차 일수 11일, 2년 차 15일 ...'},
+        ]
+        usage_stub = _stub_completion('연차 일수가 가장 비싼 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('연차 일수가 가장 비싼 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '비싼거?', history=history,
+            )
+        self.assertNotIn('지급금액 기준', result)
+
     def test_rewrite_query_with_history_preserves_ordinal_in_cleanup(self):
         history = [
             {'role': 'user', 'content': '경조사 규정 알려줘'},
@@ -239,6 +381,11 @@ class QueryRewriterPremiseTests(TestCase):
             )
         mocked.assert_called_once()
         # cleanup pipeline 이 ordinal/ranking 토큰을 깎아먹지 않는다.
-        self.assertEqual(result, '경조사 중 두 번째로 비싼 항목')
+        # v0.5.4 — history 에 금액 패턴(`500만`) 이 있으므로 monetary guard 가
+        # `지급금액 기준` suffix 를 덧붙일 수 있다. 핵심은 ordinal/comparative
+        # 토큰이 살아있는 것.
+        self.assertIn('두 번째', result)
+        self.assertIn('비싼', result)
+        self.assertIn('경조사', result)
         self.assertIs(usage, usage_stub)
         self.assertEqual(model, 'gpt-mini')
