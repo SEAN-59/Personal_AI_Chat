@@ -13,7 +13,7 @@ from django.db import transaction
 
 from files.models import Document, DocumentChunk
 from files.services.chunker import chunk_text
-from files.services.embedder import EmbeddingError, embed_texts
+from files.services.embedder import EmbeddingError, embed_text, embed_texts
 from files.services.extractor import (
     EmptyTextError,
     UnsupportedFileType,
@@ -170,6 +170,32 @@ def reembed_document(document: Document, new_text: str) -> int:
         document.error_message = str(e)[:2000]
         document.save(update_fields=['error_message'])
         raise PipelineError(str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# 단일 chunk 재임베딩 (실패 시 기존 content/embedding 보존)
+# ---------------------------------------------------------------------------
+
+def reembed_chunk(chunk: DocumentChunk, new_content: str) -> None:
+    """단일 chunk content + embedding 을 원자적으로 갱신.
+
+    - 임베딩 호출은 atomic 블록 밖에서 수행 → 실패 시 DB 변경 없음.
+    - 성공 시에만 update_fields=['content','embedding'] 로 저장.
+    - document.status / edited_text / error_message 는 건드리지 않는다.
+    """
+    text = (new_content or '').strip()
+    if not text:
+        raise PipelineError('내용이 비어있습니다.')
+
+    try:
+        vector = embed_text(text)
+    except EmbeddingError as e:
+        raise PipelineError(str(e)) from e
+
+    with transaction.atomic():
+        chunk.content = text
+        chunk.embedding = vector
+        chunk.save(update_fields=['content', 'embedding'])
 
 
 # ---------------------------------------------------------------------------

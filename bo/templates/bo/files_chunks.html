@@ -11,6 +11,21 @@
   <a href="{% url 'bo:files' %}" class="btn">← 파일 목록</a>
 </header>
 
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+{% if doc.status == 'ready' %}
+<div class="alert" role="note" style="margin-bottom: var(--space-4);">
+  한 chunk 의 텍스트만 수정합니다. 해당 chunk만 재임베딩되며, 다른 chunk 와 문서 본문(<code>edited_text</code>)은 변경되지 않습니다.
+  <strong>표 행 추가/삭제 등 chunk 경계가 바뀌는 수정</strong>은 [문서 전체 수정] 으로 진행해 주세요.
+</div>
+{% endif %}
+
 <section class="card" style="margin-bottom: var(--space-4);">
   <h2 class="card-title">문서 정보</h2>
   <div style="display: flex; gap: var(--space-6); font-size: var(--font-size-sm);">
@@ -28,7 +43,12 @@
 
 {% for chunk in chunks %}
   <section class="card" style="margin-top: var(--space-4);">
-    <h3 class="card-title">#{{ chunk.chunk_index }} <small style="font-weight: normal; color: var(--color-text-secondary);">({{ chunk.content|length }}자)</small></h3>
+    <h3 class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>#{{ chunk.chunk_index }} <small style="font-weight: normal; color: var(--color-text-secondary);">({{ chunk.content|length }}자)</small></span>
+      {% if doc.status == 'ready' %}
+        <a href="{% url 'bo:chunk_edit' doc.pk chunk.pk %}" class="btn btn-sm">수정</a>
+      {% endif %}
+    </h3>
     <pre style="white-space: pre-wrap; word-break: break-word; font-size: 13px; font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace; line-height: 1.5; margin: 0;">{{ chunk.content }}</pre>
   </section>
 {% empty %}

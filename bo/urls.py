@@ -16,6 +16,7 @@ urlpatterns = [
     path('files/<int:pk>/review/', views.review, name='review'),
     path('files/<int:pk>/confirm/', views.confirm, name='confirm'),
     path('files/<int:pk>/chunks/', views.chunks, name='chunks'),
+    path('files/<int:pk>/chunks/<int:chunk_pk>/edit/', views.chunk_edit, name='chunk_edit'),
     path('files/<int:pk>/delete/', views.delete, name='delete'),
 
     # Q&A 관리 (세 섹션: 대화 로그 / 답변 응답 / 공식 Q&A)
