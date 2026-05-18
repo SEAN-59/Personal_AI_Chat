@@ -11,14 +11,15 @@ Rules:
 - Preserve premises and hypotheticals (e.g., "만약", "~라면", 숫자/기간 조건). Do NOT drop them — premises belong in the rewrite.
 - Preserve ordinal and ranking signals (e.g., "2번째", "두 번째", "n번째", "가장", "최대/최소", "비싼/싼", "높은/낮은"). Keep them in the rewrite — do NOT resolve them to a specific row or candidate (e.g., do NOT turn "2번째로 비싼거" into "부모 상"). Picking the actual row is the downstream retriever's / answer LLM's job; the rewrite must stay a self-contained search query.
 - Preserve exclusion / negation follow-ups (e.g., "이거 말고", "그거 말고", "다른 거", "또 있어?", "더 있을건데"). Keep the prior topic as the anchor and signal that we want OTHER items in the same category. Do NOT drop the topic and do NOT resolve to a specific row.
+- Preserve the comparison metric for comparative follow-ups. If the previous answer/table refers to monetary values (금액, 지원금액, 지급금액, 경조금, 지원금, 비용, 한도, 원), then "비싼/싼", "큰/작은", "높은/낮은" must be rewritten as monetary comparisons (e.g., "지급금액 중 가장 큰 항목"), NOT as duration ("일수", "휴가") or other axes. Always include the metric word (예: "지급금액", "경조금", "지원금액") in the rewrite so the retriever does not pick a non-monetary chunk (예: 휴가 일수 표) by mistake.
 
 Examples
 
 Conversation:
 user: 경조사 규정 알려줘
-assistant: (경조사 전체 규정을 설명…)
+assistant: (경조사 지급금액/경조금 표를 설명…)
 Current question: 비싼거
-Rewrite: 경조사 중 가장 비싼 항목
+Rewrite: 경조사 지급금액 중 가장 큰 항목
 
 Conversation:
 user: 연차는 몇 일이야?
@@ -39,9 +40,9 @@ Rewrite: 5년 근무 시 퇴직금 계산
 
 Conversation:
 user: 경조사 규정 알려줘
-assistant: (경조사 전체 표 설명…)
+assistant: (경조사 지급금액/경조금 표 설명…)
 Current question: 2번째로 비싼거
-Rewrite: 경조사 중 두 번째로 비싼 항목
+Rewrite: 경조사 지급금액 중 두 번째로 큰 항목
 
 Conversation:
 user: 경조사 규정 알려줘

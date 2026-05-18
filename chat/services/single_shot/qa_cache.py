@@ -13,7 +13,6 @@ from typing import Dict, List, Optional
 from chat.models import CanonicalQA
 from chat.services.qa_retriever import QAHit, search_canonical_qa
 from chat.services.single_shot.types import QueryResult
-from files.models import Document
 
 
 logger = logging.getLogger(__name__)
@@ -42,23 +41,31 @@ def find_canonical_qa(question: str) -> List[QAHit]:
 def resolve_cache_hit(qa_hits: List[QAHit]) -> Optional[QueryResult]:
     """캐시 히트면 완성된 QueryResult 를 반환, 아니면 None.
 
-    히트 조건: 리스트가 비지 않고 top 1 유사도가 `QA_CACHE_HIT_THRESHOLD` 이상.
-    sources 는 CanonicalQA 에 기록된 document 원본을 복원한다.
+    히트 조건: 리스트가 비지 않고 top 1 유사도가 `QA_CACHE_HIT_THRESHOLD` 이상,
+    그리고 매칭된 CanonicalQA 의 `sources` 가 비어있어야 함.
+
+    v0.5.4 — sources(=Document id 목록) 가 비어있지 않은 row 는 BO 재임베딩으로
+    참조 문서의 내용이 바뀌었을 가능성이 있으므로 immediate-cache 로 답을 단락
+    시키지 않는다. 옛 답을 그대로 돌려주는 stale 응답 회귀 차단. `find_canonical_qa`
+    가 만든 QAHit 은 prompt builder 의 "과거 참고 답변" 섹션에 그대로 흐른다.
     """
     if not qa_hits or qa_hits[0].similarity < QA_CACHE_HIT_THRESHOLD:
         return None
 
     hit = qa_hits[0]
+    canonical = CanonicalQA.objects.filter(pk=hit.qa_id).first()
+
+    # sources 가 있는 row 는 cache hit 대상에서 제외 (v0.5.4).
+    if canonical is None or canonical.sources:
+        logger.info(
+            'CanonicalQA cache skip (sourced row, qa_id=%s)',
+            hit.qa_id,
+        )
+        return None
+
     logger.info('CanonicalQA 캐시 히트 (sim=%.3f, qa_id=%d)', hit.similarity, hit.qa_id)
 
-    canonical = CanonicalQA.objects.filter(pk=hit.qa_id).first()
     cached_sources: List[Dict] = []
-    if canonical and canonical.sources:
-        for d in Document.objects.filter(pk__in=canonical.sources):
-            cached_sources.append({
-                'name': d.original_name,
-                'url': d.file.url if d.file else '',
-            })
 
     return QueryResult(
         reply=hit.answer,

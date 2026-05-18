@@ -4,16 +4,21 @@
 - 키워드 검색: 질문에서 뽑은 단어들로 ILIKE 매칭 + 매칭 수 기반 랭킹
 
 두 결과를 Reciprocal Rank Fusion(RRF)으로 병합해 top-K 반환.
+
+v0.5.4:
+- 후보 풀에는 `Document.status == READY` 인 chunk 만 포함.
+- 다중 키워드 동시 적중 / 질문 phrase 통째 매치는 RRF 점수에 boost 가산.
+- 최종 정렬은 score desc + chunk_id asc 로 결정적.
 """
 
 import re
 from dataclasses import dataclass
 from typing import Dict, List
 
-from django.db.models import Case, IntegerField, Q, Sum, Value, When
+from django.db.models import Case, IntegerField, Q, Value, When
 from pgvector.django import CosineDistance
 
-from files.models import DocumentChunk
+from files.models import Document, DocumentChunk
 from files.services.embedder import embed_text
 
 
@@ -26,6 +31,10 @@ KEYWORD_POOL_SIZE = 20
 
 # 최종 기본 반환 개수
 DEFAULT_TOP_K = 5
+
+# v0.5.4 — RRF 한 칸(≈1/(60+1)≈0.0164) 보다 큰 가산. 두 신호 모두 결정적.
+MULTI_KEYWORD_BOOST = 0.02   # hit_total 당 가산
+EXACT_PHRASE_BOOST = 0.05    # 질문 phrase 가 chunk 안에 통째로 들어있을 때 가산
 
 # 질문 토큰에서 제외할 조사·어미·의문사
 _STOPWORDS = {
@@ -45,6 +54,8 @@ class ChunkHit:
     document_url: str   # 원본 파일 서빙 URL (/media/origin/xxx)
     content: str
     score: float        # RRF 점수 (높을수록 관련)
+    # v0.5.4 — reranker 메타 prepend 에 사용. 기존 호출부 호환을 위해 기본값 0.
+    chunk_index: int = 0
 
 
 def search_chunks(question: str, top_k: int = DEFAULT_TOP_K) -> List[ChunkHit]:
@@ -52,60 +63,52 @@ def search_chunks(question: str, top_k: int = DEFAULT_TOP_K) -> List[ChunkHit]:
     if not question.strip():
         return []
 
+    # v0.5.4 — 후보 풀은 READY document 만.
+    ready_qs = DocumentChunk.objects.filter(
+        document__status=Document.Status.READY,
+    )
+
     # --- 1) 벡터 검색 ---
     q_vec = embed_text(question)
     vector_ids = list(
-        DocumentChunk.objects
+        ready_qs
         .annotate(distance=CosineDistance('embedding', q_vec))
-        .order_by('distance')
+        .order_by('distance', 'id')
         .values_list('id', flat=True)[:VECTOR_POOL_SIZE]
     )
 
     # --- 2) 키워드 검색 ---
     keywords = _extract_keywords(question)
     keyword_ids: List[int] = []
+    hit_total_by_id: Dict[int, int] = {}
     if keywords:
-        # Q 객체로 OR 조합 + 매칭 키워드 수로 정렬
         q_filter = Q()
         for kw in keywords:
             q_filter |= Q(content__icontains=kw)
 
-        # 각 키워드에 대해 포함 여부를 0/1로 합산 → 매칭 수
-        match_count_expr = Sum(
-            sum(
-                (
-                    Case(
-                        When(content__icontains=kw, then=Value(1)),
-                        default=Value(0),
-                        output_field=IntegerField(),
-                    )
-                    for kw in keywords
-                ),
-                start=Value(0, output_field=IntegerField()),
-            )
-        )
-        # 위 Sum은 잘못된 조합이라 간단 버전으로 대체
-        # (각 키워드별 Case를 annotate로 더함)
-        qs = DocumentChunk.objects.filter(q_filter)
+        qs = ready_qs.filter(q_filter)
+        # 각 키워드별 Case 를 annotate 로 더해 hit_total 계산.
+        from django.db.models import F
+        total_expr = None
         for i, kw in enumerate(keywords):
+            field = f'_hit_{i}'
             qs = qs.annotate(
                 **{
-                    f'_hit_{i}': Case(
+                    field: Case(
                         When(content__icontains=kw, then=Value(1)),
                         default=Value(0),
                         output_field=IntegerField(),
                     )
                 }
             )
-        # 총합을 hit_total 필드로
-        from django.db.models import F
-        total_expr = None
-        for i in range(len(keywords)):
-            col = F(f'_hit_{i}')
+            col = F(field)
             total_expr = col if total_expr is None else total_expr + col
-        qs = qs.annotate(hit_total=total_expr).order_by('-hit_total')
+        qs = qs.annotate(hit_total=total_expr).order_by('-hit_total', 'id')
 
-        keyword_ids = list(qs.values_list('id', flat=True)[:KEYWORD_POOL_SIZE])
+        for row in qs.values('id', 'hit_total')[:KEYWORD_POOL_SIZE]:
+            cid = row['id']
+            keyword_ids.append(cid)
+            hit_total_by_id[cid] = int(row['hit_total'] or 0)
 
     # --- 3) RRF 병합 ---
     rrf_scores: Dict[int, float] = {}
@@ -117,8 +120,26 @@ def search_chunks(question: str, top_k: int = DEFAULT_TOP_K) -> List[ChunkHit]:
     if not rrf_scores:
         return []
 
-    # --- 4) top_k id 뽑기 ---
-    top_ids = sorted(rrf_scores.keys(), key=lambda cid: rrf_scores[cid], reverse=True)[:top_k]
+    # --- 3.5) v0.5.4 boost — multi-keyword + exact phrase.
+    candidate_ids = list(rrf_scores.keys())
+    phrase = (question or '').strip()
+    phrase_match_by_id: Dict[int, bool] = {}
+    if phrase:
+        matched = ready_qs.filter(
+            id__in=candidate_ids, content__icontains=phrase,
+        ).values_list('id', flat=True)
+        phrase_match_by_id = {cid: True for cid in matched}
+
+    for cid in candidate_ids:
+        if hit_total_by_id.get(cid):
+            rrf_scores[cid] += MULTI_KEYWORD_BOOST * hit_total_by_id[cid]
+        if phrase_match_by_id.get(cid):
+            rrf_scores[cid] += EXACT_PHRASE_BOOST
+
+    # --- 4) 결정적 tie-break: score desc, id asc.
+    top_ids = sorted(
+        rrf_scores.keys(), key=lambda cid: (-rrf_scores[cid], cid),
+    )[:top_k]
 
     # --- 5) 객체 조회 + 순서 보존 ---
     chunks_by_id = {
@@ -137,6 +158,7 @@ def search_chunks(question: str, top_k: int = DEFAULT_TOP_K) -> List[ChunkHit]:
             document_url=c.document.file.url if c.document.file else '',
             content=c.content,
             score=rrf_scores[cid],
+            chunk_index=c.chunk_index,
         ))
     return hits
 

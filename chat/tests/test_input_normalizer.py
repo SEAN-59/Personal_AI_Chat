@@ -126,3 +126,13 @@ class InputNormalizerServiceTests(TestCase):
         result = normalize('조부모상')
         self.assertTrue(result.changed)
         self.assertEqual(result.normalized, '조부모 상')
+
+    def test_contains_rule_spacing_fix_in_phrase(self):
+        # v0.5.4: phrase 안의 띄어쓰기 교정 — `조부모상 경조사비 얼마야` 처럼
+        # exact 매치는 안되지만 phrase 안에 패턴이 들어있는 케이스.
+        # contains 1건만 적용되고 즉시 종료(single best rule).
+        self._mk('조부모상', '조부모 상', match_type='contains')
+        result = normalize('조부모상 경조사비 얼마야')
+        self.assertTrue(result.changed)
+        self.assertEqual(result.normalized, '조부모 상 경조사비 얼마야')
+        self.assertEqual(len(result.applied), 1)
