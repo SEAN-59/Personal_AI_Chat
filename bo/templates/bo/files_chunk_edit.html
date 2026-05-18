@@ -1,0 +1,64 @@
+{% extends 'bo/base.html' %}
+
+{% block title %}청크 수정 #{{ chunk.chunk_index }} — {{ doc.original_name }}{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">청크 수정</h1>
+    <p class="page-description">{{ doc.original_name }} · #{{ chunk.chunk_index }}</p>
+  </div>
+  <a href="{% url 'bo:chunks' doc.pk %}" class="btn">← 청크 목록</a>
+</header>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<div class="alert alert-danger" role="alert">
+  ⚠ 이 화면에서는 <strong>단 하나의 chunk만 재임베딩</strong>됩니다.
+  이후 <strong>문서 전체 재임베딩</strong>을 실행하면 chunk 단위로 수정한 내용이 <strong>덮어써집니다(사라집니다)</strong>.
+</div>
+
+<div class="alert" role="note">
+  저장 시 <strong>임베딩 API 1회 호출</strong>이 발생합니다.
+  표 행 추가/삭제 등 chunk 경계가 바뀌는 변경은 [문서 전체 수정]으로 진행하세요.
+</div>
+
+<section class="card">
+  <h2 class="card-title">청크 메타</h2>
+  <div style="display: flex; gap: var(--space-6); font-size: var(--font-size-sm); margin-bottom: var(--space-4);">
+    <span><strong>문서:</strong> {{ doc.original_name }}</span>
+    <span><strong>chunk_index:</strong> {{ chunk.chunk_index }}</span>
+    <span><strong>글자 수:</strong> <span id="stat-chars">{{ char_count }}</span></span>
+    <span><strong>토큰 수:</strong> <span id="stat-tokens">{{ token_count }}</span> / {{ max_tokens }}</span>
+  </div>
+
+  <form method="post" action="{% url 'bo:chunk_edit' doc.pk chunk.pk %}">
+    {% csrf_token %}
+    <textarea name="content" id="editor" required
+      style="width:100%; min-height:400px; padding: var(--space-4); font-family:'SF Mono', Menlo, Monaco, monospace; font-size: 13px; line-height:1.5; border:1px solid var(--color-border); border-radius: var(--radius-md); resize: vertical;">{{ content }}</textarea>
+    <div style="display:flex; gap: var(--space-3); justify-content:flex-end; margin-top: var(--space-4);">
+      <a href="{% url 'bo:chunks' doc.pk %}" class="btn">취소</a>
+      <button type="submit" class="btn btn-primary">저장 및 재임베딩</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const editor = document.getElementById('editor');
+    const statChars = document.getElementById('stat-chars');
+    if (!editor || !statChars) return;
+    editor.addEventListener('input', () => {
+      statChars.textContent = editor.value.length;
+    });
+  })();
+</script>
+{% endblock %}

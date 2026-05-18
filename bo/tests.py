@@ -791,3 +791,201 @@ class ChunksRelatedNameTests(TestCase):
         doc = _make_doc(status=Document.Status.READY)
         with self.assertRaises(AttributeError):
             _ = doc.documentchunk_set
+
+
+# ---------------------------------------------------------------------------
+# Issue #93 — chunk 단위 편집 & 재임베딩
+# ---------------------------------------------------------------------------
+
+
+def _fake_vec(_text):
+    # 결정적 벡터. 입력 길이로 0번 슬롯만 살짝 바꿔서 변경 가능 여부 확인.
+    v = [0.0] * 1536
+    v[0] = float(len(_text) % 7) + 0.1
+    return v
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ReembedChunkServiceTests(TestCase):
+    """Issue #93 §8.1 — `reembed_chunk` 서비스 단위."""
+
+    def test_reembed_chunk_success_updates_content_and_embedding(self):
+        from files.services import pipeline
+        doc = _make_doc(status=Document.Status.READY)
+        chunks = _make_chunks(doc, count=3)
+        target = chunks[1]
+        other = chunks[2]
+
+        with patch('files.services.pipeline.embed_text', side_effect=_fake_vec) as m:
+            pipeline.reembed_chunk(target, '새 내용')
+
+        m.assert_called_once_with('새 내용')
+        target.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(target.content, '새 내용')
+        self.assertNotEqual(target.embedding[0], 0.0)
+        # 다른 chunk 미변경.
+        self.assertEqual(other.content, 'chunk 2')
+
+    def test_reembed_chunk_empty_content_raises_pipeline_error(self):
+        from files.services import pipeline
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        with patch('files.services.pipeline.embed_text', side_effect=_fake_vec) as m:
+            with self.assertRaises(pipeline.PipelineError):
+                pipeline.reembed_chunk(chunk, '   ')
+        m.assert_not_called()
+        chunk.refresh_from_db()
+        self.assertEqual(chunk.content, 'chunk 0')
+
+    def test_reembed_chunk_embedding_failure_preserves_original(self):
+        from files.services import pipeline
+        from files.services.embedder import EmbeddingError
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+
+        with patch('files.services.pipeline.embed_text', side_effect=EmbeddingError('boom')):
+            with self.assertRaises(pipeline.PipelineError):
+                pipeline.reembed_chunk(chunk, '새 내용')
+
+        chunk.refresh_from_db()
+        self.assertEqual(chunk.content, 'chunk 0')
+
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ChunkEditViewTests(TestCase):
+    """Issue #93 §8.2 — chunk_edit view 통합."""
+
+    def _url(self, doc, chunk):
+        return reverse('bo:chunk_edit', args=[doc.pk, chunk.pk])
+
+    def test_get_renders_form_for_ready_doc(self):
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        response = self.client.get(self._url(doc, chunk))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '단 하나의 chunk만 재임베딩')
+        self.assertContains(response, '임베딩 API 1회 호출')
+        self.assertContains(response, 'chunk 0')
+
+    def test_get_404_for_chunk_belonging_to_other_doc(self):
+        doc_a = _make_doc(status=Document.Status.READY)
+        doc_b = _make_doc(status=Document.Status.READY)
+        chunk_b = _make_chunks(doc_b, 1)[0]
+        url = reverse('bo:chunk_edit', args=[doc_a.pk, chunk_b.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_redirects_when_doc_not_ready(self):
+        doc = _make_doc(status=Document.Status.REVIEWING)
+        chunk = _make_chunks(doc, 1)[0]
+        response = self.client.get(self._url(doc, chunk))
+        self.assertRedirects(response, reverse('bo:chunks', args=[doc.pk]))
+
+    def test_post_calls_service_and_redirects(self):
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        with patch('bo.views.files.reembed_chunk') as m:
+            response = self.client.post(self._url(doc, chunk), {'content': '새 본문'})
+        self.assertRedirects(response, reverse('bo:chunks', args=[doc.pk]))
+        self.assertEqual(m.call_count, 1)
+        args, _kwargs = m.call_args
+        self.assertEqual(args[0].pk, chunk.pk)
+        self.assertEqual(args[1], '새 본문')
+
+    def test_post_real_service_updates_db_with_embed_text_patched(self):
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        with patch('files.services.pipeline.embed_text', side_effect=_fake_vec):
+            response = self.client.post(self._url(doc, chunk), {'content': '실서비스 갱신'})
+        self.assertEqual(response.status_code, 302)
+        chunk.refresh_from_db()
+        self.assertEqual(chunk.content, '실서비스 갱신')
+        self.assertNotEqual(chunk.embedding[0], 0.0)
+
+    def test_post_embedding_failure_shows_error_and_keeps_content(self):
+        from files.services.embedder import EmbeddingError
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        with patch('files.services.pipeline.embed_text', side_effect=EmbeddingError('nope')):
+            response = self.client.post(self._url(doc, chunk), {'content': '실패해라'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '재임베딩 실패')
+        chunk.refresh_from_db()
+        self.assertEqual(chunk.content, 'chunk 0')
+
+    def test_post_over_token_limit_rejects_without_calling_service(self):
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        # 8001 토큰 이상 — 단순한 영문 단어 반복으로 충분히 초과.
+        huge = ('word ' * 9000).strip()
+        with patch('bo.views.files.reembed_chunk') as m_svc, \
+             patch('files.services.pipeline.embed_text') as m_emb:
+            response = self.client.post(self._url(doc, chunk), {'content': huge})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '토큰 상한')
+        m_svc.assert_not_called()
+        m_emb.assert_not_called()
+        chunk.refresh_from_db()
+        self.assertEqual(chunk.content, 'chunk 0')
+
+    def test_post_empty_content_rejects_without_calling_service(self):
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        with patch('bo.views.files.reembed_chunk') as m_svc, \
+             patch('files.services.pipeline.embed_text') as m_emb:
+            response = self.client.post(self._url(doc, chunk), {'content': '   '})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '내용이 비어')
+        m_svc.assert_not_called()
+        m_emb.assert_not_called()
+
+    def test_chunks_page_shows_edit_button_only_when_ready(self):
+        ready_doc = _make_doc(status=Document.Status.READY)
+        _make_chunks(ready_doc, 1)
+        response = self.client.get(reverse('bo:chunks', args=[ready_doc.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '/edit/')
+        self.assertContains(response, '>수정</a>')
+
+        # 비-READY 상태: edit 버튼 없음.
+        reviewing = _make_doc(status=Document.Status.REVIEWING)
+        _make_chunks(reviewing, 1)
+        response2 = self.client.get(reverse('bo:chunks', args=[reviewing.pk]))
+        self.assertEqual(response2.status_code, 200)
+        self.assertNotContains(response2, '>수정</a>')
+
+    def test_sidebar_active_on_chunk_edit_page(self):
+        doc = _make_doc(status=Document.Status.READY)
+        chunk = _make_chunks(doc, 1)[0]
+        response = self.client.get(self._url(doc, chunk))
+        content = response.content.decode()
+        # 파일관리 사이드바 항목이 active 클래스로 렌더되는지.
+        import re
+        match = re.search(r'<a[^>]+href="[^"]*/bo/files/"[^>]+class="([^"]+)"', content)
+        self.assertIsNotNone(match, '파일관리 사이드바 링크를 찾을 수 없음')
+        self.assertIn('active', match.group(1))
+
+    def test_review_page_shows_full_reembed_warning_when_ready(self):
+        doc = _make_doc(status=Document.Status.READY)
+        response = self.client.get(reverse('bo:review', args=[doc.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '모든 chunk 를 새로 생성')
+
+    def test_full_reembed_document_still_works_after_chunk_edit(self):
+        from files.services import pipeline
+        doc = _make_doc(status=Document.Status.READY, edited_text='원문')
+        chunks = _make_chunks(doc, 3)
+        # chunk 편집 1회.
+        with patch('files.services.pipeline.embed_text', side_effect=_fake_vec):
+            pipeline.reembed_chunk(chunks[1], 'chunk 단위 마커')
+        chunks[1].refresh_from_db()
+        self.assertEqual(chunks[1].content, 'chunk 단위 마커')
+
+        # 전체 재임베딩 → 새 chunk 셋으로 교체.
+        with patch('files.services.pipeline.embed_texts', return_value=[[0.0]*1536]):
+            pipeline.reembed_document(doc, '새 전체 본문')
+
+        # chunk 단위 수정분 사라짐.
+        contents = list(doc.chunks.values_list('content', flat=True))
+        self.assertNotIn('chunk 단위 마커', contents)

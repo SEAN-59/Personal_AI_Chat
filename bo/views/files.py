@@ -4,7 +4,7 @@ from pathlib import Path
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 
 from chat.models import CanonicalQA, ChatLog
 from files.services.chunker import count_tokens
@@ -14,8 +14,13 @@ from files.services.pipeline import (
     PipelineError,
     extract_document,
     finalize_document,
+    reembed_chunk,
     reembed_document,
 )
+
+
+# 단일 chunk 편집 시 허용 토큰 상한 (text-embedding-3-small 8191 한도 여유분)
+MAX_CHUNK_EDIT_TOKENS = 8000
 
 
 # 업로드 설정
@@ -163,6 +168,75 @@ def chunks(request, pk):
         'total': chunk_list.count(),
     }
     return render(request, 'bo/files_chunks.html', context)
+
+
+@require_http_methods(["GET", "POST"])
+def chunk_edit(request, pk, chunk_pk):
+    """단일 DocumentChunk 의 content 를 편집하고 해당 chunk 만 재임베딩.
+
+    - READY 문서 한정. 그 외 상태에서는 chunks 페이지로 redirect.
+    - 다른 문서 소속 chunk_pk 는 자동 404.
+    """
+    chunk = get_object_or_404(
+        DocumentChunk.objects.select_related('document'),
+        pk=chunk_pk,
+        document_id=pk,
+    )
+    doc = chunk.document
+
+    if doc.status != Document.Status.READY:
+        messages.error(request, '준비완료 상태의 문서만 chunk 단위로 수정할 수 있습니다.')
+        return redirect('bo:chunks', pk=pk)
+
+    if request.method == 'POST':
+        new_content = (request.POST.get('content') or '').strip()
+        form_error = None
+        if not new_content:
+            form_error = '내용이 비어있습니다.'
+        else:
+            token_count = count_tokens(new_content)
+            if token_count > MAX_CHUNK_EDIT_TOKENS:
+                form_error = (
+                    f'토큰 상한({MAX_CHUNK_EDIT_TOKENS:,})을 초과했습니다 '
+                    f'(현재 {token_count:,} 토큰). 내용을 줄여주세요.'
+                )
+
+        if form_error:
+            messages.error(request, form_error)
+            return render(request, 'bo/files_chunk_edit.html', {
+                'doc': doc,
+                'chunk': chunk,
+                'content': new_content,
+                'char_count': len(new_content),
+                'token_count': count_tokens(new_content) if new_content else 0,
+                'max_tokens': MAX_CHUNK_EDIT_TOKENS,
+            })
+
+        try:
+            reembed_chunk(chunk, new_content)
+        except PipelineError as e:
+            messages.error(request, f'재임베딩 실패: {e}')
+            return render(request, 'bo/files_chunk_edit.html', {
+                'doc': doc,
+                'chunk': chunk,
+                'content': new_content,
+                'char_count': len(new_content),
+                'token_count': count_tokens(new_content),
+                'max_tokens': MAX_CHUNK_EDIT_TOKENS,
+            })
+
+        messages.success(request, f'#{chunk.chunk_index} 청크를 재임베딩했습니다.')
+        return redirect('bo:chunks', pk=pk)
+
+    content = chunk.content
+    return render(request, 'bo/files_chunk_edit.html', {
+        'doc': doc,
+        'chunk': chunk,
+        'content': content,
+        'char_count': len(content),
+        'token_count': count_tokens(content) if content else 0,
+        'max_tokens': MAX_CHUNK_EDIT_TOKENS,
+    })
 
 
 @require_POST
