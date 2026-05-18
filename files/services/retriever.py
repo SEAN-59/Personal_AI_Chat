@@ -36,14 +36,52 @@ DEFAULT_TOP_K = 5
 MULTI_KEYWORD_BOOST = 0.02   # hit_total 당 가산
 EXACT_PHRASE_BOOST = 0.05    # 질문 phrase 가 chunk 안에 통째로 들어있을 때 가산
 
-# 질문 토큰에서 제외할 조사·어미·의문사
+# 질문 토큰에서 제외할 조사·어미·의문사·범용 enumeration 단서.
 _STOPWORDS = {
     '뭐야', '뭔가요', '뭐예요', '어디', '어디야', '언제', '누가', '얼마나',
     '어떻게', '왜', '어떤', '무엇', '뭔지', '알려줘', '알려주세요',
     '입니까', '입니다', '있나요', '있어요', '이야', '야',
     '은', '는', '이', '가', '을', '를', '의', '에', '와', '과', '로',
     '해', '해줘', '해주세요', '그럼',
+    # v0.5.5 — 범용 enumeration / 질문 보조어. 도메인 어휘는 제외하지 않음.
+    '모든', '전부', '전체', '종류', '목록', '리스트', '각각', '여러',
+    '말해줘', '말해', '보여줘', '보여',
 }
+
+# v0.5.5 — generic 한국어 접미사 (조사/어미). 토큰 끝에서 가장 긴 것부터 1회 제거.
+# 도메인 어휘 하드코딩 금지 — 어디까지나 generic suffix.
+_TOKEN_SUFFIXES = (
+    # 어미 4글자
+    '하시나요', '드립니다', '드리나요', '입니다만',
+    # 어미/조사 3글자
+    '하나요', '합니까', '합니다', '했어요', '했나요', '하려고', '한다면',
+    '에서는', '에서도', '에서만', '에게서', '에서의', '으로서', '으로써',
+    '이라고', '이라는',
+    # 어미/조사 2글자
+    '하는', '한다', '했다', '하고', '해서', '하며', '하면', '하기', '하지',
+    '하나', '했어', '하다', '되는', '된다', '됐다', '되어', '되고',
+    '에서', '에게', '에는', '에도', '으로', '에서', '까지', '부터', '마다',
+    '처럼', '보다', '같이', '라는', '라고', '이나', '이란', '이든', '이다',
+    '께서', '에게', '한테',
+    # 1글자 조사
+    '은', '는', '이', '가', '을', '를', '의', '에', '와', '과', '로',
+    '도', '만', '나', '랑', '며',
+)
+
+
+def _normalize_token(tok: str) -> str:
+    """토큰 끝의 조사/어미를 보수적으로 한 번 제거. 한국어 토큰만 적용.
+
+    제거 후 최소 2글자 이상 + 한글이 남아야 정규화 적용. 그 외에는 원본 유지.
+    """
+    if not tok or not re.fullmatch(r'[가-힣]+', tok):
+        return tok
+    for suf in _TOKEN_SUFFIXES:
+        if len(tok) > len(suf) and tok.endswith(suf):
+            stem = tok[: -len(suf)]
+            if len(stem) >= 2 and re.fullmatch(r'[가-힣]+', stem):
+                return stem
+    return tok
 
 
 @dataclass
@@ -170,12 +208,16 @@ def _extract_keywords(question: str) -> List[str]:
     """
     # 특수문자 제거 후 공백 기준 분리
     tokens = re.findall(r'[가-힣A-Za-z0-9]+', question)
-    # 2글자 이상 & 불용어 제외
-    keywords = [t for t in tokens if len(t) >= 2 and t not in _STOPWORDS]
+    # 조사/어미 정규화 → 2글자 이상 + 불용어 제외
+    normalized: List[str] = []
+    for t in tokens:
+        n = _normalize_token(t)
+        if len(n) >= 2 and n not in _STOPWORDS:
+            normalized.append(n)
     # 중복 제거 (순서 유지)
     seen = set()
     uniq = []
-    for kw in keywords:
+    for kw in normalized:
         if kw not in seen:
             uniq.append(kw)
             seen.add(kw)

@@ -78,7 +78,9 @@ class TableLookupWorkflow:
     def execute(self, normalized: Mapping[str, Any]) -> WorkflowResult:
         query: str = normalized['query']
 
-        hits = retrieve_documents(query)
+        # v0.5.5 — table_lookup 은 자체 _MAX_TABLES_IN_PROMPT 트리밍이 있어
+        # neighbor expansion 영향 범위에서 제외. 명시적으로 False.
+        hits = retrieve_documents(query, expand_neighbors=False)
 
         # 표를 포함하는 청크만 candidate 으로 유지.
         candidates: list[tuple[str, list[dict[str, Any]]]] = []

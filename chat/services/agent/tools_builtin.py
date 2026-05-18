@@ -234,7 +234,9 @@ def _retrieve_callable(arguments: Mapping[str, Any]) -> dict:
     from chat.services.agent.result import SourceRef
 
     query = arguments['query']
-    hits = _retrieve(query)
+    # v0.5.5 — agent path 는 _summarize_retrieve top-N/window 정책과 함께
+    # 별도 phase 에서 다룬다. 이번 phase 는 명시적으로 expansion 미적용.
+    hits = _retrieve(query, expand_neighbors=False)
     evidence = []
     if hits:
         first = hits[0]

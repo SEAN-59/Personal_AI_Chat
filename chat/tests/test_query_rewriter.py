@@ -363,6 +363,36 @@ class QueryRewriterPremiseTests(TestCase):
             )
         self.assertNotIn('지급금액 기준', result)
 
+    # ------------------------------------------------------------------
+    # v0.5.5 — neighbor expansion 회귀 봉인
+    # ------------------------------------------------------------------
+
+    def test_v055_monetary_guard_still_attaches_metric_suffix(self):
+        """`비싼거` follow-up 에서 `지급금액 기준` 부착이 v0.5.5 후에도 유지."""
+        history = self._money_history()
+        usage_stub = _stub_completion('경조사 중 가장 비싼 항목')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 중 가장 비싼 항목', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '비싼거', history=history,
+            )
+        self.assertIn('지급금액 기준', result)
+
+    def test_v055_enumeration_question_skips_monetary_guard(self):
+        """`모든 종류 알려줘` 는 비교/금액 query 가 아니므로 metric suffix 부착 X."""
+        history = self._money_history()
+        usage_stub = _stub_completion('경조사 모든 종류')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 모든 종류', usage_stub, 'gpt-mini'),
+        ):
+            result, _, _ = query_rewriter.rewrite_query_with_history(
+                '모든 종류 알려줘', history=history,
+            )
+        self.assertNotIn('지급금액 기준', result)
+
     def test_rewrite_query_with_history_preserves_ordinal_in_cleanup(self):
         history = [
             {'role': 'user', 'content': '경조사 규정 알려줘'},
