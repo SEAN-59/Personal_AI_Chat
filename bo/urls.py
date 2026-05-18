@@ -56,6 +56,12 @@ urlpatterns = [
     # Agent 운영 제어 (Phase 8-3) — singleton 페이지라 pk 없음.
     path('agent/', views.agent_view, name='agent'),
 
+    # v0.5.6: 채팅 문제 제보 (Issue #94)
+    path('reports/', views.report_list, name='report_list'),
+    path('reports/<int:pk>/', views.report_detail, name='report_detail'),
+    path('reports/<int:pk>/update/', views.report_update, name='report_update'),
+    path('reports/<int:pk>/delete/', views.report_delete, name='report_delete'),
+
     # v0.5.2: 입력 정규화 규칙 CRUD.
     path('input-normalization/', views.input_norm_index, name='input_norm'),
     path('input-normalization/new/', views.input_norm_new, name='input_norm_new'),

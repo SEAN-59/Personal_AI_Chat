@@ -370,6 +370,42 @@ class AgentSettingsAudit(models.Model):
         return f'[{when}] {who} → {fields}'
 
 
+class ProblemReport(models.Model):
+    """사용자가 채팅 화면에서 제출한 문제 제보 (v0.5.6 Issue #94).
+
+    스냅샷(`conversation`)은 서버가 `/message/` 처리 시점에 누적한
+    `problem_report_snapshot` 세션 키를 정규화한 결과를 그대로 저장한다.
+    ChatLog 텍스트 매칭은 사용하지 않는다.
+    """
+
+    STATUS_CHOICES = (
+        ('open', '신규'),
+        ('in_progress', '확인 중'),
+        ('resolved', '해결'),
+        ('wontfix', '보류'),
+    )
+
+    title = models.CharField(max_length=120)
+    content = models.TextField()
+    session_key = models.CharField(max_length=64, db_index=True, blank=True)
+    last_question = models.CharField(max_length=500, blank=True)
+    conversation = models.JSONField(default=list)
+    turn_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default='open', db_index=True,
+    )
+    admin_note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '문제 제보'
+
+    def __str__(self):
+        return f'[{self.status}] {self.title[:40]}'
+
+
 class InputNormalizationRule(models.Model):
     """v0.5.2 — BO에서 관리하는 사용자 입력 정규화 규칙.
 

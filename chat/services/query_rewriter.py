@@ -43,6 +43,18 @@ _PROMPT_PATH = 'chat/query_rewriter.md'
 # 비정상적으로 긴 응답은 프롬프트 탈선으로 간주하고 버린다.
 _MAX_REWRITE_LEN = 200
 
+# v0.5.6+ QA: `경조사 다 알려줘` 처럼 주제가 현재 질문에 이미 들어있는
+# broad enumeration 요청은 history 에 끌려 특정 이전 항목으로 좁혀지면 안 된다.
+# 단, `모든 종류 알려줘` 처럼 주제어가 없는 후속 질문은 rewriter 가 필요하다.
+_ENUMERATION_HINTS = (
+    '모든', '전부', '전체', '종류', '목록', '리스트', '다 알려줘', '전부 다',
+)
+_ENUMERATION_STOPWORDS = {
+    '모든', '전부', '전체', '종류', '목록', '리스트', '알려줘', '알려주세요',
+    '말해줘', '보여줘', '다', '좀', '전체적으로',
+}
+_ENUMERATION_SUFFIXES = ('에서', '에는', '에도', '으로', '까지', '부터', '의')
+
 
 # ---------------------------------------------------------------------------
 # v0.5.4 — monetary metric guard
@@ -101,6 +113,9 @@ def rewrite_query_with_history(
 
     history_slice = _tail_history(history, REWRITE_HISTORY_TURNS)
     if not history_slice:
+        return question, None, None
+
+    if _is_self_contained_enumeration_question(question):
         return question, None, None
 
     try:
@@ -167,6 +182,41 @@ def _apply_monetary_metric_guard(
         return cleaned
 
     return f'{cleaned} {_MONETARY_METRIC_SUFFIX}'
+
+
+def _is_self_contained_enumeration_question(question: str) -> bool:
+    """현재 질문만으로 주제어가 있는 broad enumeration 요청인지 판정.
+
+    예:
+    - `경조사 다 알려줘` / `휴가 종류의 전체 목록 알려줘` → True
+    - `모든 종류 알려줘` → False (주제어가 없어 history 필요)
+    """
+    q = (question or '').strip()
+    if not q:
+        return False
+    if not any(hint in q for hint in _ENUMERATION_HINTS):
+        return False
+
+    tokens = re.findall(r'[가-힣A-Za-z0-9]+', q)
+    meaningful: list[str] = []
+    for tok in tokens:
+        normalized = _strip_enumeration_suffix(tok)
+        if len(normalized) < 2:
+            continue
+        if normalized in _ENUMERATION_STOPWORDS:
+            continue
+        meaningful.append(normalized)
+    return bool(meaningful)
+
+
+def _strip_enumeration_suffix(token: str) -> str:
+    """Enumeration 판정용 최소 조사 제거."""
+    if not token or not re.fullmatch(r'[가-힣]+', token):
+        return token
+    for suffix in _ENUMERATION_SUFFIXES:
+        if len(token) > len(suffix) and token.endswith(suffix):
+            return token[: -len(suffix)]
+    return token
 
 
 # ---------------------------------------------------------------------------

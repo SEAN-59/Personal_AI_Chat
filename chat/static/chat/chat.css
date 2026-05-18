@@ -104,6 +104,29 @@ body {
   letter-spacing: -.01em;
 }
 
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chat-header-report {
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+.chat-header-report:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
 .chat-header-reset {
   font-family: inherit;
   font-size: var(--font-size-xs);
@@ -547,4 +570,109 @@ body {
   width: 100%;
   height: 100%;
   border: none;
+}
+
+/* ── Report Modal (v0.5.6) ── */
+.report-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.report-modal[hidden] { display: none; }
+
+.report-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.report-modal-panel {
+  position: relative;
+  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  width: 90vw;
+  max-width: 480px;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-lg);
+}
+
+.report-modal-panel h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.report-modal-notice {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.report-modal-panel form label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.report-modal-panel input[type="text"],
+.report-modal-panel textarea {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-1);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  box-sizing: border-box;
+}
+
+.report-modal-panel textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.report-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.report-modal-actions button {
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+}
+
+.report-modal-actions button[type="submit"] {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+}
+
+.report-modal-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.report-modal-feedback {
+  margin: var(--space-3) 0 0;
+  min-height: 1.2em;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }

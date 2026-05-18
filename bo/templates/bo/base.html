@@ -39,6 +39,14 @@
             </svg>
             Q&amp;A 관리
           </a>
+          <a href="{% url 'bo:report_list' %}" class="sidebar-nav-item {% if current == 'report_list' or current == 'report_detail' or current == 'report_update' %}active{% endif %}">
+            <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 9v4"></path>
+              <path d="M12 17h.01"></path>
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            </svg>
+            문제 제보
+          </a>
           <a href="{% url 'bo:prompts' %}" class="sidebar-nav-item {% if current == 'prompts' or current == 'prompts_edit' %}active{% endif %}">
             <svg class="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"></path>

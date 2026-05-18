@@ -26,6 +26,7 @@ from .router_rules import (
     router_rules_bulk_delete,
 )
 from .agent import agent_view
+from .reports import report_list, report_detail, report_update, report_delete
 from .input_normalization import (
     input_norm_index,
     input_norm_new,

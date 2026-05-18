@@ -1,0 +1,159 @@
+{% extends 'bo/base.html' %}
+{% load report_extras %}
+
+{% block title %}문제 제보 #{{ report.id }}{% endblock %}
+
+{% block extra_head %}
+{% include 'bo/_report_styles.html' %}
+{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">문제 제보 #{{ report.id }}</h1>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-secondary" href="{% url 'bo:report_list' %}">목록으로</a>
+  </div>
+</header>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}" data-auto-dismiss>{{ message }}</div>
+  {% endfor %}
+{% endif %}
+
+<div class="report-detail-grid">
+  <div class="report-stack">
+    <section class="card">
+      <h2 class="card-title">제보 내용</h2>
+      <dl class="report-meta-list" style="margin-bottom: var(--space-4);">
+        <div class="report-meta-item">
+          <dt>제목</dt>
+          <dd>{{ report.title }}</dd>
+        </div>
+        <div class="report-meta-item">
+          <dt>마지막 질문</dt>
+          <dd>{{ report.last_question|default:"(없음)" }}</dd>
+        </div>
+      </dl>
+      <div class="report-md">{{ report.content|report_markdown }}</div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">대화 타임라인</h2>
+      {% if report.conversation %}
+        <div class="report-timeline">
+          {% for turn in report.conversation %}
+            <article class="report-turn {% if turn.role == 'user' %}report-turn-user{% endif %}">
+              <header class="report-turn-header">
+                <div>
+                  {% if turn.role == 'user' %}
+                    <span class="badge badge-info">사용자</span>
+                  {% else %}
+                    <span class="badge badge-success">TA9</span>
+                  {% endif %}
+                </div>
+                <span>{{ turn.ts|server_time:"%Y-%m-%d %H:%M:%S"|default:"시간 없음" }}</span>
+              </header>
+              <div class="report-turn-body">
+                <div class="report-md">{{ turn.content|report_markdown }}</div>
+                {% if turn.role == 'assistant' %}
+                  {% if turn.sources %}
+                    <div class="report-sources">
+                      <strong class="report-summary-label">답변 근거</strong>
+                      <ul class="report-source-list">
+                        {% for src in turn.sources %}
+                          <li>
+                            {% if src.name %}<strong>{{ src.name }}</strong>{% else %}<strong>이름 없음</strong>{% endif %}
+                            {% if src.url %}<br><span>{{ src.url }}</span>{% endif %}
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                  {% if turn.chat_log_id %}
+                    <div class="report-meta" style="margin-top: var(--space-3);">
+                      <span>chat_log_id: {{ turn.chat_log_id }}</span>
+                    </div>
+                  {% endif %}
+                {% endif %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state">
+          <div class="empty-state-title">대화 스냅샷이 비어 있습니다</div>
+          <div>사용자가 대화 없이 제보했거나, 세션이 초기화된 뒤 제출된 제보입니다.</div>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <aside class="report-stack report-side-panel">
+    <section class="card">
+      <div class="report-card-title-row">
+        <h2 class="card-title">메타 정보</h2>
+        {% if report.status == 'open' %}
+          <span class="badge badge-warning">{{ report.get_status_display }}</span>
+        {% elif report.status == 'in_progress' %}
+          <span class="badge badge-info">{{ report.get_status_display }}</span>
+        {% elif report.status == 'resolved' %}
+          <span class="badge badge-success">{{ report.get_status_display }}</span>
+        {% else %}
+          <span class="badge badge-danger">{{ report.get_status_display }}</span>
+        {% endif %}
+      </div>
+      <dl class="report-meta-list">
+        <div class="report-meta-item">
+          <dt>ID</dt>
+          <dd>#{{ report.id }}</dd>
+        </div>
+        <div class="report-meta-item">
+          <dt>메시지 수</dt>
+          <dd>{{ report.turn_count }}</dd>
+        </div>
+        <div class="report-meta-item">
+          <dt>생성</dt>
+          <dd>{{ report.created_at|server_time:"%Y-%m-%d %H:%M:%S" }}</dd>
+        </div>
+        <div class="report-meta-item">
+          <dt>수정</dt>
+          <dd>{{ report.updated_at|server_time:"%Y-%m-%d %H:%M:%S" }}</dd>
+        </div>
+        <div class="report-meta-item" style="grid-column: 1 / -1;">
+          <dt>세션 키</dt>
+          <dd>{{ report.session_key|default:"(없음)" }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">관리자 액션</h2>
+      <form class="report-action-form" method="post" action="{% url 'bo:report_update' report.pk %}">
+        {% csrf_token %}
+        <label class="form-group">
+          <span class="form-label">상태</span>
+          <select class="input" name="status">
+            {% for code, label in status_choices %}
+              <option value="{{ code }}" {% if report.status == code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="form-group">
+          <span class="form-label">관리자 메모</span>
+          <textarea class="input" name="admin_note" rows="7" maxlength="4000"
+                    placeholder="확인한 내용, 재현 조건, 후속 작업을 짧게 남겨주세요.">{{ report.admin_note }}</textarea>
+        </label>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </form>
+      <form class="report-delete-form" method="post" action="{% url 'bo:report_delete' report.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger" onclick="return confirm('이 문제 제보를 완전히 삭제할까요?');">삭제</button>
+        <p class="report-danger-note">삭제하면 이 제보와 대화 스냅샷은 복구할 수 없습니다.</p>
+      </form>
+    </section>
+  </aside>
+</div>
+{% endblock %}

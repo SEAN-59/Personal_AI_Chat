@@ -9,4 +9,5 @@ urlpatterns = [
     path('message/', views.message, name='message'),
     path('reset/', views.reset, name='reset'),
     path('feedback/', views.feedback, name='feedback'),
+    path('report/', views.problem_report, name='problem_report'),
 ]

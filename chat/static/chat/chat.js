@@ -13,6 +13,7 @@
   const MESSAGE_URL = '/message/';
   const RESET_URL = '/reset/';
   const FEEDBACK_URL = '/feedback/';
+  const REPORT_URL = window.REPORT_URL || '/report/';
 
   // ─── 메시지 렌더링 ───
 
@@ -328,6 +329,100 @@
     addBotMessage('안녕하세요! TA9 챗봇입니다.\n무엇을 도와드릴까요?');
     setInputEnabled(true);
   });
+
+  // ─── 문제 제보 모달 (v0.5.6) ───
+  const reportBtn = document.getElementById('reportBtn');
+  const reportModal = document.getElementById('reportModal');
+  const reportForm = document.getElementById('reportForm');
+  const reportTitleInput = document.getElementById('reportTitle');
+  const reportContentInput = document.getElementById('reportContent');
+  const reportSubmit = document.getElementById('reportSubmit');
+  const reportFeedback = document.getElementById('reportFeedback');
+
+  function openReportModal() {
+    if (!reportModal) return;
+    reportModal.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (reportFeedback) reportFeedback.textContent = '';
+    setTimeout(() => { if (reportTitleInput) reportTitleInput.focus(); }, 0);
+  }
+
+  function closeReportModal() {
+    if (!reportModal) return;
+    reportModal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  if (reportBtn) {
+    reportBtn.addEventListener('click', openReportModal);
+  }
+  if (reportModal) {
+    reportModal.querySelectorAll('[data-close]').forEach((el) => {
+      el.addEventListener('click', closeReportModal);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !reportModal.hidden) closeReportModal();
+    });
+  }
+  if (reportForm) {
+    reportForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = (reportTitleInput.value || '').trim();
+      const content = (reportContentInput.value || '').trim();
+      if (!title) {
+        reportFeedback.textContent = '제목을 입력해 주세요.';
+        return;
+      }
+      if (title.length > 120) {
+        reportFeedback.textContent = '제목은 120자 이내로 입력해 주세요.';
+        return;
+      }
+      if (!content) {
+        reportFeedback.textContent = '내용을 입력해 주세요.';
+        return;
+      }
+      if (content.length > 4000) {
+        reportFeedback.textContent = '내용은 4,000자 이내로 입력해 주세요.';
+        return;
+      }
+      reportSubmit.disabled = true;
+      reportFeedback.textContent = '전송 중…';
+      try {
+        const res = await fetch(REPORT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({ title, content }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          reportFeedback.textContent = '제보가 접수되었습니다. 감사합니다.';
+          setTimeout(() => {
+            closeReportModal();
+            reportTitleInput.value = '';
+            reportContentInput.value = '';
+            reportFeedback.textContent = '';
+            reportSubmit.disabled = false;
+          }, 1500);
+        } else if (res.status >= 400 && res.status < 500) {
+          const errMap = {
+            title_required: '제목을 확인해 주세요.',
+            content_required: '내용을 확인해 주세요.',
+            invalid_json: '요청 형식이 잘못되었습니다.',
+          };
+          reportFeedback.textContent = errMap[data.error] || '요청이 잘못되었습니다.';
+          reportSubmit.disabled = false;
+        } else {
+          throw new Error('server');
+        }
+      } catch (_) {
+        reportFeedback.textContent = '전송에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+        reportSubmit.disabled = false;
+      }
+    });
+  }
 
   input.focus();
 })();
