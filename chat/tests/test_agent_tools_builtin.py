@@ -55,7 +55,8 @@ class RetrieveDocumentsToolTests(SimpleTestCase):
             return_value=[chunk, chunk, chunk],
         ) as mocked:
             obs = tools.call('retrieve_documents', {'query': '본인 상 경조금'})
-        mocked.assert_called_once_with('본인 상 경조금')
+        # v0.5.5 — agent path 는 neighbor expansion out-of-scope 명시 호출.
+        mocked.assert_called_once_with('본인 상 경조금', expand_neighbors=False)
         self.assertFalse(obs.is_failure)
         self.assertIn('3건', obs.summary)
         self.assertIn('경조사_규정.pdf', obs.summary)
@@ -273,7 +274,7 @@ class RetrieveDocumentsAliasTests(SimpleTestCase):
         ) as mocked:
             obs = tools.call('retrieve_documents', {'text': '급여 지급일'})
         # canonical key 로 정규화돼 _retrieve 에 도달.
-        mocked.assert_called_once_with('급여 지급일')
+        mocked.assert_called_once_with('급여 지급일', expand_neighbors=False)
         # schema_invalid 회귀 차단.
         self.assertNotEqual(obs.failure_kind, 'schema_invalid')
         # Observation 은 LLM 이 시도한 raw args 그대로 보존.

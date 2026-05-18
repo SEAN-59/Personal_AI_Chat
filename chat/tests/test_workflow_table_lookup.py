@@ -148,6 +148,29 @@ class TableLookupRetrievalTests(SimpleTestCase):
         self.assertEqual(r.status, WorkflowStatus.UPSTREAM_ERROR)
         self.assertIn('일시적', r.details['reason'])
 
+    def test_calls_retrieve_documents_with_expand_neighbors_false(self):
+        """v0.5.5 — table_lookup 은 neighbor expansion 영향 받지 않아야 한다.
+
+        `_MAX_TABLES_IN_PROMPT` 트리밍과 이중 작용 위험 때문에 explicit
+        `expand_neighbors=False` 호출 계약을 봉인.
+        """
+        with patch(
+            'chat.workflows.domains.general.table_lookup.retrieve_documents',
+            return_value=[_chunk(_TABLE_CHUNK)],
+        ) as retrieve_mock, \
+             self._patch_llm(
+                 '{"answer": "500만원", "source_document": "x.pdf",'
+                 ' "matched_row": "본인 상", "matched_column": "금액"}'
+             ), \
+             self._patch_load_prompt(), \
+             self._patch_record_usage():
+            r = self._run({'query': '본인 상 경조금?'})
+
+        self.assertEqual(r.status, WorkflowStatus.OK)
+        retrieve_mock.assert_called_once()
+        _, kwargs = retrieve_mock.call_args
+        self.assertEqual(kwargs.get('expand_neighbors'), False)
+
     def test_llm_json_garbage_returns_upstream_error(self):
         with self._patch_retrieve([_chunk(_TABLE_CHUNK)]), \
              self._patch_llm('not json at all'), \
