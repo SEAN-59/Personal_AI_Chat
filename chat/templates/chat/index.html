@@ -18,7 +18,10 @@
     <header class="chat-header">
       <div class="chat-frame">
         <div class="chat-header-title">AI 채팅</div>
-        <button type="button" class="chat-header-reset" id="resetBtn" aria-label="대화 초기화">초기화</button>
+        <div class="chat-header-actions">
+          <button type="button" class="chat-header-report" id="reportBtn" aria-label="문제 제보">문제 제보</button>
+          <button type="button" class="chat-header-reset" id="resetBtn" aria-label="대화 초기화">초기화</button>
+        </div>
       </div>
     </header>
 
@@ -55,6 +58,29 @@
     </form>
   </div>
 
+  <div class="report-modal" id="reportModal" hidden aria-modal="true" role="dialog" aria-labelledby="reportModalTitle">
+    <div class="report-modal-backdrop" data-close></div>
+    <div class="report-modal-panel">
+      <h2 id="reportModalTitle">문제 제보</h2>
+      <p class="report-modal-notice">
+        제보를 보내면 <strong>현재 대화 전체와 답변 근거(sources)</strong>가
+        관리자에게 함께 전송됩니다. 민감 정보는 제외해 주세요.
+      </p>
+      <form id="reportForm">
+        <label>제목 <input type="text" id="reportTitle" maxlength="120" required></label>
+        <label>내용 <textarea id="reportContent" maxlength="4000" rows="6" required></textarea></label>
+        <div class="report-modal-actions">
+          <button type="button" data-close>취소</button>
+          <button type="submit" id="reportSubmit">제출</button>
+        </div>
+        <p class="report-modal-feedback" id="reportFeedback" role="status"></p>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    window.REPORT_URL = "{% url 'chat:problem_report' %}";
+  </script>
   <script src="{% static 'chat/chat.js' %}"></script>
 </body>
 </html>

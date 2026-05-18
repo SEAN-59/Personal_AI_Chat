@@ -972,6 +972,156 @@ class ChunkEditViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '모든 chunk 를 새로 생성')
 
+    def _unused(self):
+        pass
+
+
+# ---------------------------------------------------------------------------
+# v0.5.6 — BO 문제 제보 (Issue #94)
+# ---------------------------------------------------------------------------
+
+@override_settings(STORAGES=_NO_MANIFEST_STORAGES)
+class ProblemReportBoTests(TestCase):
+    """BO 리스트/상세/업데이트 회귀."""
+
+    def setUp(self):
+        from chat.models import ProblemReport
+        self.r = ProblemReport.objects.create(
+            title='버그',
+            content='답이 이상함',
+            last_question='왜 안 돼?',
+            turn_count=2,
+            conversation=[
+                {'role': 'user', 'content': '왜 안 돼?', 'ts': ''},
+                {'role': 'assistant', 'content': '죄송합니다', 'sources': [{'name': 'a', 'url': 'b'}], 'chat_log_id': 7, 'ts': ''},
+            ],
+        )
+
+    def test_list_renders(self):
+        url = reverse('bo:report_list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '문제 제보')
+        self.assertContains(response, '<table class="report-table">')
+        self.assertContains(response, '버그')
+        self.assertContains(response, '마지막 질문')
+        self.assertContains(response, '메시지')
+        self.assertContains(response, '2개')
+        self.assertContains(response, '전체')
+        self.assertContains(response, '신규')
+
+    def test_list_paginates_ten_reports_per_page(self):
+        from chat.models import ProblemReport
+        for idx in range(11):
+            ProblemReport.objects.create(title=f'제보 {idx}', content='내용')
+
+        url = reverse('bo:report_list')
+        first = self.client.get(url)
+        second = self.client.get(url, {'page': 2})
+
+        self.assertEqual(len(first.context['items']), 10)
+        self.assertEqual(len(second.context['items']), 2)
+        self.assertContains(first, '1 / 2 페이지')
+        self.assertContains(second, '2 / 2 페이지')
+
+    def test_list_filter_by_status(self):
+        from chat.models import ProblemReport
+        ProblemReport.objects.create(title='완료된거', content='c', status='resolved')
+        url = reverse('bo:report_list')
+        response = self.client.get(url, {'status': 'resolved'})
+        self.assertContains(response, '완료된거')
+        self.assertNotContains(response, '버그')
+
+    def test_list_filter_by_q(self):
+        url = reverse('bo:report_list')
+        response = self.client.get(url, {'q': '버그'})
+        self.assertContains(response, '버그')
+
+    def test_detail_renders(self):
+        url = reverse('bo:report_detail', args=[self.r.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '버그')
+        self.assertContains(response, '답이 이상함')
+        self.assertContains(response, '사용자')
+        self.assertContains(response, 'TA9')
+        self.assertContains(response, '죄송합니다')
+        # chat_log_id 는 텍스트만, 링크 아님
+        self.assertContains(response, 'chat_log_id: 7')
+        self.assertNotContains(response, 'href="/bo/qa/logs/7')
+
+    def test_detail_renders_markdown_and_server_time(self):
+        from chat.models import ProblemReport
+        report = ProblemReport.objects.create(
+            title='마크다운',
+            content='**굵게**\n\n| 구분 | 값 |\n| --- | --- |\n| A | `1` |',
+            conversation=[
+                {'role': 'user', 'content': '- 항목', 'ts': '2026-05-18T09:10:11+09:00'},
+            ],
+        )
+
+        response = self.client.get(reverse('bo:report_detail', args=[report.pk]))
+
+        self.assertContains(response, '<strong>굵게</strong>', html=True)
+        self.assertContains(response, '<table class="report-md-table">')
+        self.assertContains(response, '<code>1</code>', html=True)
+        self.assertContains(response, '<li>항목</li>', html=True)
+        self.assertContains(response, '2026-05-18 09:10:11')
+
+    def test_update_status(self):
+        url = reverse('bo:report_update', args=[self.r.pk])
+        response = self.client.post(url, {'status': 'in_progress', 'admin_note': ''})
+        self.assertEqual(response.status_code, 302)
+        self.r.refresh_from_db()
+        self.assertEqual(self.r.status, 'in_progress')
+
+    def test_update_admin_note(self):
+        url = reverse('bo:report_update', args=[self.r.pk])
+        response = self.client.post(url, {'status': 'open', 'admin_note': '확인했음'})
+        self.assertEqual(response.status_code, 302)
+        self.r.refresh_from_db()
+        self.assertEqual(self.r.admin_note, '확인했음')
+
+    def test_update_invalid_status_rejected(self):
+        url = reverse('bo:report_update', args=[self.r.pk])
+        response = self.client.post(url, {'status': 'nope', 'admin_note': ''})
+        self.assertEqual(response.status_code, 400)
+        self.r.refresh_from_db()
+        self.assertEqual(self.r.status, 'open')
+
+    def test_update_admin_note_too_long_rejected(self):
+        url = reverse('bo:report_update', args=[self.r.pk])
+        response = self.client.post(url, {'status': 'open', 'admin_note': 'x' * 4001})
+        self.assertEqual(response.status_code, 400)
+        self.r.refresh_from_db()
+        self.assertEqual(self.r.admin_note, '')
+
+    def test_delete_hard_deletes_report(self):
+        from chat.models import ProblemReport
+        url = reverse('bo:report_delete', args=[self.r.pk])
+        response = self.client.post(url)
+
+        self.assertRedirects(response, reverse('bo:report_list'))
+        self.assertFalse(ProblemReport.objects.filter(pk=self.r.pk).exists())
+
+    def test_sidebar_active_on_report_pages(self):
+        # base.html 사이드바에서 report_list 가 active 클래스로 렌더되는지.
+        import re
+        url = reverse('bo:report_detail', args=[self.r.pk])
+        response = self.client.get(url)
+        content = response.content.decode()
+        match = re.search(r'href="/bo/reports/"[^>]*class="([^"]+)"', content)
+        self.assertIsNotNone(match)
+        self.assertIn('active', match.group(1))
+
+
+# ---------------------------------------------------------------------------
+# (이전 ChunkEdit 클래스의 잔여 메서드는 보존)
+# ---------------------------------------------------------------------------
+
+class _ChunkEditExtraTests(TestCase):
+    """Issue #93 §8.2 추가 — chunk 단위 편집 후 전체 재임베딩 회귀."""
+
     def test_full_reembed_document_still_works_after_chunk_edit(self):
         from files.services import pipeline
         doc = _make_doc(status=Document.Status.READY, edited_text='원문')

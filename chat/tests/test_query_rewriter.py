@@ -393,6 +393,42 @@ class QueryRewriterPremiseTests(TestCase):
             )
         self.assertNotIn('지급금액 기준', result)
 
+    def test_self_contained_enumeration_question_skips_history_rewrite(self):
+        """주제가 있는 전체 요청은 직전 세부 항목 history 에 끌려가면 안 된다."""
+        history = [
+            {'role': 'user', 'content': '조부모상'},
+            {'role': 'assistant', 'content': '조부모 상은 20만 원, 휴가 2일입니다.'},
+        ]
+        with patch('chat.services.query_rewriter._call_rewriter_llm') as mocked:
+            result, usage, model = query_rewriter.rewrite_query_with_history(
+                '경조사 다 알려줘',
+                history=history,
+            )
+        self.assertEqual(result, '경조사 다 알려줘')
+        self.assertIsNone(usage)
+        self.assertIsNone(model)
+        mocked.assert_not_called()
+
+    def test_topicless_enumeration_follow_up_still_uses_history_rewrite(self):
+        """주제가 빠진 `모든 종류` 류 후속 질문은 기존처럼 history 로 보완한다."""
+        history = [
+            {'role': 'user', 'content': '경조사 규정 알려줘'},
+            {'role': 'assistant', 'content': '경조사 지급금액 표를 설명합니다.'},
+        ]
+        usage_stub = _stub_completion('경조사 모든 종류')[1]
+        with patch(
+            'chat.services.query_rewriter._call_rewriter_llm',
+            return_value=('경조사 모든 종류', usage_stub, 'gpt-mini'),
+        ) as mocked:
+            result, usage, model = query_rewriter.rewrite_query_with_history(
+                '모든 종류 알려줘',
+                history=history,
+            )
+        mocked.assert_called_once()
+        self.assertEqual(result, '경조사 모든 종류')
+        self.assertIs(usage, usage_stub)
+        self.assertEqual(model, 'gpt-mini')
+
     def test_rewrite_query_with_history_preserves_ordinal_in_cleanup(self):
         history = [
             {'role': 'user', 'content': '경조사 규정 알려줘'},

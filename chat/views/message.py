@@ -5,7 +5,11 @@ from django.views.decorators.http import require_http_methods
 
 from chat.graph.app import run_chat_graph
 from chat.services.history_service import (
-    clear_history, get_history, save_history,
+    append_report_snapshot_turn,
+    clear_history,
+    clear_report_snapshot,
+    get_history,
+    save_history,
 )
 from chat.services.single_shot.types import QueryPipelineError
 
@@ -36,6 +40,9 @@ def message(request):
     history.append({'role': 'assistant', 'content': result.reply})
     save_history(request, history)
 
+    # v0.5.6 — 문제 제보용 스냅샷 누적 (chat_history 와 병렬, 독립 캡).
+    append_report_snapshot_turn(request, user_text, result)
+
     return JsonResponse({
         'reply': result.reply,
         'sources': result.sources,
@@ -47,4 +54,5 @@ def message(request):
 def reset(request):
     # 세션 히스토리 초기화
     clear_history(request)
+    clear_report_snapshot(request)
     return JsonResponse({'ok': True})

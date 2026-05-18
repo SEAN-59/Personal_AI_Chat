@@ -1,0 +1,168 @@
+{% extends 'bo/base.html' %}
+{% load report_extras %}
+
+{% block title %}문제 제보{% endblock %}
+
+{% block extra_head %}
+{% include 'bo/_report_styles.html' %}
+{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 class="page-title">문제 제보</h1>
+    <p class="page-description">사용자가 채팅 화면에서 남긴 제보와 당시 대화 스냅샷을 확인합니다.</p>
+  </div>
+</header>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %}" data-auto-dismiss>{{ message }}</div>
+  {% endfor %}
+{% endif %}
+
+<section class="report-summary-grid" aria-label="문제 제보 요약">
+  <div class="report-summary-card">
+    <span class="report-summary-label">전체</span>
+    <strong class="report-summary-value">{{ all_count }}</strong>
+  </div>
+  <div class="report-summary-card">
+    <span class="report-summary-label">신규</span>
+    <strong class="report-summary-value">{{ status_counts.open|default:0 }}</strong>
+  </div>
+  <div class="report-summary-card">
+    <span class="report-summary-label">확인 중</span>
+    <strong class="report-summary-value">{{ status_counts.in_progress|default:0 }}</strong>
+  </div>
+  <div class="report-summary-card">
+    <span class="report-summary-label">해결</span>
+    <strong class="report-summary-value">{{ status_counts.resolved|default:0 }}</strong>
+  </div>
+</section>
+
+<section class="card report-filter-card">
+  <form class="report-search" method="get" role="search">
+    <select name="status" class="input" aria-label="상태">
+      <option value="">전체 상태</option>
+      {% for code, label in status_choices %}
+        <option value="{{ code }}" {% if status == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <div class="input-icon-wrap">
+      <span class="input-icon input-icon-left">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <input class="input input-with-icon-left" type="search" name="q" value="{{ q }}"
+             placeholder="제목, 내용, 마지막 질문 검색…" aria-label="문제 제보 검색">
+    </div>
+    {% if status or q %}
+      <a class="btn btn-secondary refresh-btn" href="{% url 'bo:report_list' %}" title="검색 초기화" aria-label="검색 초기화">
+        <svg class="refresh-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 12a8 8 0 1 0 1.5-4.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </a>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">검색</button>
+  </form>
+</section>
+
+{% if page_obj.paginator.count %}
+  <section class="card report-table-card" aria-label="문제 제보 목록">
+    <div class="report-table-head">
+      <div>
+        <h2 class="card-title">제보 목록</h2>
+        <p class="report-table-subtitle">10개 단위로 표시됩니다. 제목을 누르면 상세 대화 스냅샷을 확인합니다.</p>
+      </div>
+      <span class="report-pill">총 {{ total_count }}건</span>
+    </div>
+    <div class="report-table-wrap">
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="width: 72px;">ID</th>
+            <th style="width: 112px;">상태</th>
+            <th>제목 / 마지막 질문</th>
+            <th style="width: 90px;">메시지</th>
+            <th style="width: 120px;">세션</th>
+            <th style="width: 150px;">생성</th>
+            <th style="width: 150px;">수정</th>
+            <th style="width: 92px;">상세</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in items %}
+            <tr>
+              <td class="report-table-id">#{{ r.id }}</td>
+              <td>
+                {% if r.status == 'open' %}
+                  <span class="badge badge-warning">{{ r.get_status_display }}</span>
+                {% elif r.status == 'in_progress' %}
+                  <span class="badge badge-info">{{ r.get_status_display }}</span>
+                {% elif r.status == 'resolved' %}
+                  <span class="badge badge-success">{{ r.get_status_display }}</span>
+                {% else %}
+                  <span class="badge badge-danger">{{ r.get_status_display }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <a class="report-title-link" href="{% url 'bo:report_detail' r.id %}">{{ r.title }}</a>
+                <div class="report-last-question">
+                  {% if r.last_question %}
+                    {{ r.last_question|truncatechars:100 }}
+                  {% else %}
+                    마지막 질문 없음
+                  {% endif %}
+                </div>
+              </td>
+              <td><span class="report-pill">{{ r.turn_count }}개</span></td>
+              <td class="report-table-muted">{{ r.session_key|slice:":8"|default:"-" }}</td>
+              <td class="report-table-muted">{{ r.created_at|server_time }}</td>
+              <td class="report-table-muted">{{ r.updated_at|server_time }}</td>
+              <td><a class="btn btn-secondary btn-sm" href="{% url 'bo:report_detail' r.id %}">보기</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="pagination">
+      <div class="pagination-row">
+        {% if page_obj.has_previous %}
+          <a class="pagination-btn" href="?{{ page_query }}page={{ page_obj.previous_page_number }}">‹ 이전</a>
+        {% else %}
+          <span class="pagination-btn disabled">‹ 이전</span>
+        {% endif %}
+        {% for n in page_obj.paginator.page_range %}
+          {% if n == page_obj.number %}
+            <span class="pagination-page active">{{ n }}</span>
+          {% else %}
+            <a class="pagination-page" href="?{{ page_query }}page={{ n }}">{{ n }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+          <a class="pagination-btn" href="?{{ page_query }}page={{ page_obj.next_page_number }}">다음 ›</a>
+        {% else %}
+          <span class="pagination-btn disabled">다음 ›</span>
+        {% endif %}
+      </div>
+      <div class="pagination-info">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 페이지</div>
+    </nav>
+  {% endif %}
+{% else %}
+  <div class="empty-state">
+    <div class="empty-state-title">
+      {% if q or status %}조건에 맞는 제보가 없습니다{% else %}아직 제보가 없습니다{% endif %}
+    </div>
+    <div>
+      {% if q or status %}검색 조건을 바꾸거나 초기화해 보세요.
+      {% else %}채팅 화면에서 사용자가 문제 제보를 보내면 여기에 쌓입니다.{% endif %}
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
